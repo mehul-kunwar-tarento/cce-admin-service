@@ -866,7 +866,13 @@ exception text, SQL, stack trace, host or class name is ever put in `message`.
 | Case | `message` |
 |------|-----------|
 | 401, any token problem | `Missing or invalid token.` — the actual reason is only in a DEBUG log |
-| Bean validation | Names the failing field (exact text confirmed in S1) |
+| Bean validation (body or query) | `Invalid request: <field> <rule>.`, every failing field, A–Z, joined by `; ` — e.g. `Invalid request: name must not be blank.`, `Invalid request: pageSize must be less than or equal to 100.` |
+| Value of the wrong type in a query parameter (`?page=abc`) | `Invalid request: page has an invalid value.` |
+| Broken JSON, missing body, wrong field type in the body | `Request body is not valid JSON, or a field has the wrong type.` |
+| 404 `NOT_FOUND`, unknown URL | `No endpoint GET /admin/v1/rolez.` (method and path of the request) |
+| 405 `METHOD_NOT_ALLOWED` | `Method DELETE is not allowed for this URL.` |
+| 415 `UNSUPPORTED_MEDIA_TYPE` | `Content-Type text/plain is not supported. Send JSON (Content-Type: application/json).` (type/subtype only; no `Content-Type` counts as `application/octet-stream`) |
+| Any other 4xx Spring raises itself (e.g. 406 when `Accept` asks for XML) | Keeps that status, code `VALIDATION_ERROR`: `The request could not be processed (HTTP 406).` No reference id, no ERROR log. With `Accept: application/xml` the body is empty, since only JSON can be sent |
 | Permissions without `/me/menus` (D6) | `Every role must keep GET /admin/v1/me/menus, or its users cannot load their sidebar. Add it back to the list and save again. Nothing was changed.` |
 | Role rename (D9) | `Role name cannot be changed (it is used in Keycloak and the gateway). Only displayName and description can be edited. To use a different name, create a new role. Nothing was changed.` |
 | Name used by a gateway permission set (D11, 409) | `This name is already used by an existing permission set in the gateway. Choose another name.` |
