@@ -68,12 +68,12 @@ public class GlobalExceptionHandler {
 		return build(HttpStatus.BAD_REQUEST, ErrorCode.VALIDATION_ERROR, message);
 	}
 
-	/** Bean validation on a request body, e.g. @NotBlank. Names every failing field, sorted. */
+	/** Bean validation on a body or on query parameters. Names every failing field, sorted. */
 	@ExceptionHandler(MethodArgumentNotValidException.class)
-	public ResponseEntity<ErrorResponse> handleInvalidBody(MethodArgumentNotValidException e) {
+	public ResponseEntity<ErrorResponse> handleInvalidInput(MethodArgumentNotValidException e) {
 		List<String> problems = new ArrayList<>();
 		for (FieldError fieldError : e.getBindingResult().getFieldErrors()) {
-			problems.add(fieldError.getField() + " " + fieldError.getDefaultMessage());
+			problems.add(describe(fieldError));
 		}
 		Collections.sort(problems);
 		String message = "Invalid request: " + String.join("; ", problems) + ".";
@@ -94,6 +94,17 @@ public class GlobalExceptionHandler {
 		String message = "Something went wrong on our side. The change in this request was not saved. "
 				+ "Try again; if it keeps failing, report reference " + reference + ".";
 		return build(HttpStatus.INTERNAL_SERVER_ERROR, ErrorCode.INTERNAL_ERROR, message);
+	}
+
+	/**
+	 * "pageSize must be less than or equal to 100", or for a value of the wrong type (?page=abc)
+	 * a fixed text, since Spring's own text names Java classes.
+	 */
+	private String describe(FieldError fieldError) {
+		if (fieldError.isBindingFailure()) {
+			return fieldError.getField() + " has an invalid value";
+		}
+		return fieldError.getField() + " " + fieldError.getDefaultMessage();
 	}
 
 	/** The 4xx status a Spring MVC exception carries (e.g. 406), or null if it is not one. */

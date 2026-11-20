@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.json.JsonCompareMode;
 import org.springframework.test.web.servlet.MockMvc;
 
 @WebMvcTest(HealthController.class)
@@ -27,7 +28,7 @@ class HealthControllerTest {
 
 		mockMvc.perform(get("/admin/v1/health"))
 				.andExpect(status().isOk())
-				.andExpect(content().json("{\"status\":\"UP\",\"db\":\"UP\"}", true));
+				.andExpect(content().json("{\"status\":\"UP\",\"db\":\"UP\"}", JsonCompareMode.STRICT));
 	}
 
 	@Test
@@ -36,7 +37,7 @@ class HealthControllerTest {
 
 		mockMvc.perform(get("/admin/v1/health"))
 				.andExpect(status().isOk())
-				.andExpect(content().json("{\"status\":\"UP\",\"db\":\"DOWN\"}", true));
+				.andExpect(content().json("{\"status\":\"UP\",\"db\":\"DOWN\"}", JsonCompareMode.STRICT));
 	}
 
 	@Test
