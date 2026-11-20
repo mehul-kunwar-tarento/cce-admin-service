@@ -11,5 +11,9 @@ spring:
     url: ${DB_URL}
     username: ${DB_USERNAME}
     password: ${DB_PASSWORD}
+    hikari:
+      # Fail fast when the database is down (default is 30s), so /health and API calls answer quickly
+      connection-timeout: 2000
+      validation-timeout: 1000
   jpa:
     open-in-view: false
