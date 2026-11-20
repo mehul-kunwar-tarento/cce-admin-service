@@ -1,0 +1,15 @@
+# Settings for every environment. Only environment-neutral defaults live here;
+# every localhost value is in application-local.yml.
+
+server:
+  port: ${SERVER_PORT:8085}
+
+spring:
+  application:
+    name: cce-admin-service
+  datasource:
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+  jpa:
+    open-in-view: false

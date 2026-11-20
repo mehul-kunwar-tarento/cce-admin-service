@@ -1,0 +1,10 @@
+# Local only, used with SPRING_PROFILES_ACTIVE=local.
+# Values for the docker compose environment (docker-compose.yml). Secrets are read from .env, never written here.
+
+spring:
+  config:
+    import: optional:file:.env[.properties]
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5434/admin_service}
+    username: ${DB_USERNAME:admin_service}
+    password: ${DB_PASSWORD:${POSTGRES_PASSWORD}}
