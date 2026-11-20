@@ -83,8 +83,8 @@ through gateway-service (PRD §9 "Network").
 | Concern | Technology | Version |
 |---------|------------|---------|
 | Language | Java | 21 |
-| Framework | Spring Boot | 3.x (exact version confirmed in S1) |
-| Build tool | Gradle (wrapper `gradlew`, Groovy DSL, same as `gateway-service`) | 8.x (confirmed in S1) |
+| Framework | Spring Boot | 3.5.6 (same as `gateway-service`) |
+| Build tool | Gradle (wrapper `gradlew`, Groovy DSL, same as `gateway-service`) | 8.14.3 |
 | REST endpoints | Spring Web MVC (`@RestController`) | |
 | Persistence | Spring Data JPA + Hibernate | |
 | Migrations | Flyway (`src/main/resources/db/migration`) | |
@@ -92,7 +92,7 @@ through gateway-service (PRD §9 "Network").
 | Security | `spring-boot-starter-oauth2-resource-server` (JWKS) | |
 | Keycloak calls | `org.keycloak:keycloak-admin-client` | |
 | Gateway call | Spring `RestClient` | |
-| API docs | springdoc-openapi (OpenAPI 3 + Swagger UI) | |
+| API docs | springdoc-openapi (OpenAPI 3 + Swagger UI) | 2.8.13 |
 | Identity provider | Keycloak | 26.5.4 (local, S0; same as `deploy-scripts`) |
 | Testing | JUnit 5, Spring Boot Test, Testcontainers (Postgres), WireMock (fake gateway) | |
 | Coverage / static analysis | — | not in v1 |
@@ -163,13 +163,12 @@ at least one row (D4).
 
 ## 6. Package Structure
 
-Planned layout from the SPEC deliverables. The sub-task that adds each file is in brackets. The
-base package and the application class name are confirmed in S1; package names not given in the
-SPEC are marked.
+Layout from the SPEC deliverables. The sub-task that adds each file is in brackets; files from
+later sub-tasks are planned. Package names not given in the SPEC are marked.
 
 ```
-<base package>/                                    # (confirmed in S1)
-├── <Application>.java                             # @SpringBootApplication entry point (S1)
+org/openphc/cce/admin/
+├── CceAdminServiceApplication.java                # @SpringBootApplication entry point; adds RequiredSettingsCheck (S1)
 │
 ├── api/                                           # Response envelope
 │   ├── ApiResponse.java                           #   {data, pagination?} (S1)
@@ -183,10 +182,13 @@ SPEC are marked.
 │   └── GlobalExceptionHandler.java                #   @RestControllerAdvice: D12 mapping, reference id on 500 (S1)
 │
 ├── health/
-│   └── HealthController.java                      #   GET /admin/v1/health → {status, db}, not enveloped (S1)
+│   ├── HealthController.java                      #   GET /admin/v1/health → {status, db}, not enveloped (S1)
+│   ├── HealthResponse.java                        #   {status, db} (S1)
+│   └── DatabaseCheck.java                         #   Pool connection + isValid(1s); never throws (S1)
 │
 ├── config/                                        # Spring configuration
-│   ├── OpenApiConfig.java                         #   Swagger UI + /v3/api-docs (S1)
+│   ├── RequiredSettingsCheck.java                 #   Stops startup naming any missing or empty DB_URL / DB_USERNAME / DB_PASSWORD (S1)
+│   ├── OpenApiConfig.java                         #   Swagger UI + /v3/api-docs, title "CCE Admin Service API" v1 (S1)
 │   ├── SecurityConfig.java                        #   Stateless; open paths; everything else authenticated (S3)
 │   ├── JwtProperties.java                         #   JWT_ISSUER, JWT_AUDIENCE, JWT_JWK_SET_URI, JWT_ROLES_CLAIM_PATH (S3)
 │   ├── KeycloakProperties.java                    #   KEYCLOAK_BASE_URL, _REALM, _CLIENT_ID, _CLIENT_SECRET; 10s timeout (S2a)
@@ -272,10 +274,15 @@ src/main/resources/
 
 ```
 src/test/
-└── java/<base package>/
+└── java/org/openphc/cce/admin/
+    ├── ConfigFailFastTest.java                    # Missing / empty DB_URL stops startup (S1)
+    ├── health/DatabaseCheckTest.java, HealthControllerTest.java   # (S1)
+    ├── error/ErrorTestController.java, GlobalExceptionHandlerTest.java  # Test-only endpoints + every error case (S1)
+    ├── api/EnvelopeTestController.java, EnvelopeTest.java          # Test-only endpoints + {data} / paging (S1)
+    ├── config/OpenApiTest.java                    # Whole app without a database: /v3/api-docs, Swagger UI (S1)
     ├── MigrationTest.java                         # Flyway on Testcontainers Postgres (S2)
     ├── AuditAssert.java                           # exactlyOneRow(action, entityId) helper (S4)
-    ├── …test-only controllers                     # Exercise the error handler, paging (S1) and security (S3)
+    ├── …test-only controllers                     # Exercise security (S3)
     └── …                                          # Service tests with KeycloakClient and gateway mocked;
                                                    # WireMock as the fake gateway (S6a)
 ```
@@ -365,6 +372,7 @@ Every body is `{error:{code,message}}`; Spring's default error body never reache
 | Business rule broken (e.g. empty permission list D4, `/me/menus` row missing D6, role rename D9, own status/roles S10) | Reject before any write, message explains | 400 `VALIDATION_ERROR` |
 | Unknown user / role / menu id | Reject | 404 `USER_NOT_FOUND` / `ROLE_NOT_FOUND` / `MENU_NOT_FOUND` |
 | Unknown URL · wrong method · body not JSON | Reject | 404 `NOT_FOUND` · 405 `METHOD_NOT_ALLOWED` · 415 `UNSUPPORTED_MEDIA_TYPE` |
+| Any other client error Spring raises with its own 4xx (e.g. 406) | Reject; no ERROR log | that 4xx, `VALIDATION_ERROR` |
 | Unique conflict | Reject | 409 `DUPLICATE_ROLE_NAME` / `DUPLICATE_MENU_KEY` / `EMAIL_IN_USE` / `USERNAME_IN_USE` |
 | Delete a role still held by any user | Reject | 409 `ROLE_IN_USE` |
 | Change or delete a system role | Reject | 409 `SYSTEM_ROLE_IMMUTABLE` |

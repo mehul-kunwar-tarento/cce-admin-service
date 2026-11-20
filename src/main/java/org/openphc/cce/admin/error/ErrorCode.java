@@ -1,0 +1,21 @@
+package org.openphc.cce.admin.error;
+
+/** Every error code a caller can receive, in {"error":{"code":…}}. */
+public enum ErrorCode {
+	VALIDATION_ERROR,
+	UNAUTHENTICATED,
+	FORBIDDEN,
+	USER_NOT_FOUND,
+	ROLE_NOT_FOUND,
+	MENU_NOT_FOUND,
+	DUPLICATE_ROLE_NAME,
+	DUPLICATE_MENU_KEY,
+	EMAIL_IN_USE,
+	ROLE_IN_USE,
+	SYSTEM_ROLE_IMMUTABLE,
+	KEYCLOAK_SYNC_FAILED,
+	NOT_FOUND,
+	METHOD_NOT_ALLOWED,
+	UNSUPPORTED_MEDIA_TYPE,
+	INTERNAL_ERROR
+}

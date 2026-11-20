@@ -14,7 +14,7 @@ design; each part is marked with the sub-task that builds it and is confirmed th
 | **jq** | 1.6+ | `jq --version` |
 | **Git** | 2.x+ | `git --version` |
 | **Java** | 21 (from S1) | `java --version` → `21.x` |
-| **Gradle** | nothing to install: the repo carries the wrapper `./gradlew` (from S1; version confirmed in S1, `gateway-service` uses 8.14.3) | `./gradlew --version` |
+| **Gradle** | nothing to install: the repo carries the wrapper `./gradlew`, which downloads Gradle 8.14.3 on first use (same as `gateway-service`) | `./gradlew --version` |
 
 Ports used on your machine: **5434** (Postgres) and **8180** (Keycloak), bound to `127.0.0.1`
 only. They avoid 5433 and 8080, used by `extras/cce-local-setup`.
@@ -25,14 +25,15 @@ because 8090 is the local Protocol service.
 ## 2. Clone & Build
 
 ```bash
-git clone https://github.com/mehul-kunwar-tarento/cce-admin-service-poc.git
-cd cce-admin-service-poc
+git clone https://github.com/mehul-kunwar-tarento/cce-admin-service.git
+cd cce-admin-service
+git switch demo-dev
 ```
 
-From S1 on (commands confirmed in S1):
+From S1 on:
 
 ```bash
-# Build with tests (needs Docker running: the migration test uses Testcontainers)
+# Build with tests (from S2 on, Docker must be running: the migration test uses Testcontainers)
 ./gradlew build
 
 # Build the JAR without running tests
@@ -42,10 +43,9 @@ From S1 on (commands confirmed in S1):
 ## 3. Project Structure
 
 ```
-cce-admin-service-poc/
+cce-admin-service/
 ├── README.md                     # Quick start
-├── ARCHITECTURE.md               # What the service is and why
-├── SPEC.md                       # Decisions (D1…) and sub-tasks (S0…)
+├── LICENSE                       # Apache 2.0
 ├── docker-compose.yml            # Local Postgres + Keycloak
 ├── .env.example                  # Settings template (copy to .env)
 ├── .gitignore                    # Keeps .env out of git
@@ -54,25 +54,25 @@ cce-admin-service-poc/
 │   │   └── cce-realm-local.json  # Realm "cce", imported when Keycloak starts
 │   ├── create-superadmin.sh      # Creates the test user superadmin
 │   └── get-token.sh              # Prints a token for superadmin
-└── docs/                         # This guide and the other design docs
+├── docs/                         # This guide and the other design docs
+├── build.gradle, settings.gradle          # Gradle build (S1)
+├── gradlew, gradlew.bat, gradle/wrapper/  # Gradle wrapper, committed (S1)
+└── src/
+    ├── main/
+    │   ├── java/org/openphc/cce/admin/…   # Layout: architecture-overview.md §6
+    │   └── resources/
+    │       ├── application.yml            # Environment-neutral defaults (S1)
+    │       └── application-local.yml      # Every localhost default (S1)
+    └── test/java/org/openphc/cce/admin/…  # Tests (§13)
 ```
 
 Planned additions (sub-task in brackets):
 
 ```
-cce-admin-service-poc/
-├── build.gradle, settings.gradle          # Gradle build (S1)
-├── gradlew, gradlew.bat, gradle/wrapper/  # Gradle wrapper, committed (S1)
-├── src/
-│   ├── main/
-│   │   ├── java/<base package>/…          # Layout: architecture-overview.md §6 (S1 onwards)
-│   │   └── resources/
-│   │       ├── application.yml            # Environment-neutral defaults (S1)
-│   │       ├── application-local.yml      # Every localhost default (S1)
-│   │       └── db/migration/
-│   │           ├── V1__schema.sql         # 7 tables (S2)
-│   │           └── V2__seed.sql           # 12 menus, SUPER_ADMIN (S2)
-│   └── test/java/<base package>/…         # Tests (§13)
+cce-admin-service/
+├── src/main/resources/db/migration/
+│   ├── V1__schema.sql                     # 7 tables (S2)
+│   └── V2__seed.sql                       # 12 menus, SUPER_ADMIN (S2)
 └── local/
     ├── gateway.env.example                # Env vars for the local gateway, no secrets (S13)
     └── scenarios/
@@ -82,17 +82,18 @@ cce-admin-service-poc/
 
 ## 4. Gradle Build Configuration
 
-Planned dependencies, added by the sub-task that first needs them. The real `build.gradle` (versions,
-exact artifact ids) is confirmed in S1 and each later sub-task.
+Each dependency is added by the sub-task that first needs them. S1 rows are what `build.gradle`
+has today; later rows are planned. Versions not written here come from the Spring Boot plugin.
 
 | Dependency | Purpose | Added in |
 |------------|---------|----------|
-| Spring Boot 3.x plugin + `io.spring.dependency-management`, Java 21 toolchain | Base | S1 |
+| `org.springframework.boot` 3.5.6 + `io.spring.dependency-management` 1.1.7, Java 21 toolchain | Base | S1 |
 | `spring-boot-starter-web` | Spring Web MVC, embedded Tomcat | S1 |
-| `spring-boot-starter-validation` | Bean validation on request bodies | S1 |
-| `spring-boot-starter-data-jpa` | JPA / Hibernate | S1 |
-| PostgreSQL JDBC driver | Database | S1 |
-| springdoc-openapi | Swagger UI + `/v3/api-docs` | S1 |
+| `spring-boot-starter-validation` | Bean validation on request bodies and query parameters | S1 |
+| `spring-boot-starter-data-jpa` | JPA / Hibernate, Hikari connection pool | S1 |
+| `org.postgresql:postgresql` (runtime) | Database driver | S1 |
+| `org.springdoc:springdoc-openapi-starter-webmvc-ui` 2.8.13 | Swagger UI + `/v3/api-docs` | S1 |
+| `spring-boot-starter-test` | JUnit 5, MockMvc, Mockito, AssertJ | S1 |
 | Flyway | `V1__schema.sql`, `V2__seed.sql` | S2 |
 | Testcontainers (Postgres) | `MigrationTest` | S2 |
 | `spring-boot-starter-oauth2-resource-server` | JWT validation via JWKS | S3 |
@@ -143,7 +144,10 @@ Secrets are never in either file. Locally the service needs two of the `.env` va
 | `DB_PASSWORD` | `POSTGRES_PASSWORD` from `.env` | S1 |
 | `KEYCLOAK_CLIENT_SECRET` | `KEYCLOAK_CLIENT_SECRET` from `.env` | S2a |
 
-How they are passed to `./gradlew bootRun` is confirmed in S1 / S2a.
+Nothing has to be exported by hand: with the `local` profile, `application-local.yml` reads `.env`
+itself (`spring.config.import: optional:file:.env[.properties]`), and `DB_PASSWORD` falls back to
+`POSTGRES_PASSWORD` from it. Run from the repo root, where `.env` is. On servers there is no `.env`
+and no `local` profile: every value comes from an environment variable.
 
 ## 7. Docker Compose (Local Environment)
 
@@ -302,8 +306,6 @@ curl -s http://localhost:8085/admin/v1/me -H "Authorization: Bearer $TOKEN" | jq
 ```
 
 ## 12. Useful Gradle Commands
-
-Planned; confirmed in S1.
 
 | Command | Purpose |
 |---------|---------|

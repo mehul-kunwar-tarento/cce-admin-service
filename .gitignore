@@ -5,3 +5,7 @@
 .idea/
 *.iml
 .vscode/
+
+# Gradle output and cache
+build/
+.gradle/

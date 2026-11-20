@@ -421,9 +421,20 @@ variable with no value stops startup. YAML key names are confirmed in the sub-ta
 
 | Env var | Default | Local value | Required outside local | Sub-task |
 |---------|---------|-------------|------------------------|----------|
-| `DB_URL` | — | Postgres on `localhost:5434`, database `admin_service` (exact URL confirmed in S1) | Yes | S1 |
+| `DB_URL` | — | `jdbc:postgresql://localhost:5434/admin_service` | Yes | S1 |
 | `DB_USERNAME` | — | `admin_service` | Yes | S1 |
-| `DB_PASSWORD` | — | — (secret; from `.env`, how confirmed in S1) | Yes | S1 |
+| `DB_PASSWORD` | — | `POSTGRES_PASSWORD` from `.env` (secret; `application-local.yml` reads `.env` itself) | Yes | S1 |
+
+YAML keys: `spring.datasource.url` / `username` / `password`. Outside `local`, a missing or empty
+one stops startup with `Missing required setting(s): DB_URL, …` (`RequiredSettingsCheck`).
+
+Connection pool timeouts, fixed in `application.yml` (no env var), so a database outage is
+answered in about 2 seconds instead of Hikari's default 30:
+
+| Key | Value |
+|-----|-------|
+| `spring.datasource.hikari.connection-timeout` | `2000` ms |
+| `spring.datasource.hikari.validation-timeout` | `1000` ms |
 
 ### 7.3 JWT
 
@@ -581,4 +592,13 @@ Fields the log lines carry:
 | WARN on a gateway sync failure (D3) | role id, URL called, gateway status, full gateway response body |
 | ERROR on a half-done Keycloak/DB change (D8) | action, target user (id / username), `keycloakId`, failed step, error, cleanup result |
 
-Metrics and MDC fields are **not in v1**. The log format is confirmed in S1.
+Metrics and MDC fields are **not in v1**. The log format is Spring Boot's default console format,
+unchanged:
+
+```
+2026-11-21T00:45:18.816+05:30  INFO 90307 --- [cce-admin-service] [           main] o.s.b.w.embedded.tomcat.TomcatWebServer  : Tomcat started on port 8085 (http) with context path '/'
+<timestamp>                    <level> <pid>  [application name]  [thread]              <logger>                                 : <message>
+```
+
+The 500 line reads `ERROR … GlobalExceptionHandler : [ref=7f3a9c2e] GET /admin/v1/… failed`,
+followed by the stack trace.
