@@ -9,7 +9,9 @@
 
 ## 1. Database Tables
 
-Database `admin_service`, created by Flyway `db/migration/V1__schema.sql` (S2).
+Database `admin_service`, created by Flyway `db/migration/V1__schema.sql` (S2). Flyway keeps its
+history in `flyway_schema_history_admin`. On a shared database that already has tables (servers), it
+starts that history at version 0, so V1 and V2 both run (§7.2).
 
 ### 1.1 Conventions
 
@@ -36,8 +38,8 @@ A local copy of each person who can log in; 1:1 with a Keycloak user.
 | `status` | VARCHAR(20) | No | — | `ACTIVE` / `INACTIVE` / `LOCKED` (§3) |
 | `facility_scope` | TEXT | Yes | — | Stored and shown only, not enforced (PRD) |
 | `last_login_at` | TIMESTAMPTZ | Yes | — | From the token's `auth_time` (D7) |
-| `created_at` | TIMESTAMPTZ | No | (confirmed in S2) | |
-| `updated_at` | TIMESTAMPTZ | No | (confirmed in S2) | |
+| `created_at` | TIMESTAMPTZ | No | `now()` | |
+| `updated_at` | TIMESTAMPTZ | No | `now()` | Set by the service on each change |
 
 **Constraints & indexes:** `keycloak_id` unique · `username` unique · unique on `lower(email)` ·
 CHECK `status IN ('ACTIVE','INACTIVE','LOCKED')`.
@@ -51,8 +53,8 @@ CHECK `status IN ('ACTIVE','INACTIVE','LOCKED')`.
 | `display_name` | VARCHAR(255) | No | — | Editable |
 | `description` | TEXT | Yes | — | Editable |
 | `is_system` | BOOLEAN | No | `false` | `true` only for `SUPER_ADMIN`; system roles can't be changed or deleted |
-| `created_at` | TIMESTAMPTZ | No | (confirmed in S2) | |
-| `updated_at` | TIMESTAMPTZ | No | (confirmed in S2) | |
+| `created_at` | TIMESTAMPTZ | No | `now()` | |
+| `updated_at` | TIMESTAMPTZ | No | `now()` | Set by the service on each change |
 
 **Constraints & indexes:** `name` unique · CHECK `name ~ '^[A-Z][A-Z0-9_]*$'`. Length 100 fits
 both `api_permissions.permission_name` widths seen (100 in the gateway doc, 255 in the server seed).
@@ -72,8 +74,8 @@ The catalog of `cce-insights-ui` screens.
 | `parent_id` | UUID | Yes | — | → `menus.id`. Null for NAV; a NAV for DETAIL |
 | `sort_order` | INT | No | — | Order in the sidebar |
 | `is_active` | BOOLEAN | No | `true` | Inactive menus are hidden by `/me/menus` |
-| `created_at` | TIMESTAMPTZ | No | (confirmed in S2) | |
-| `updated_at` | TIMESTAMPTZ | No | (confirmed in S2) | |
+| `created_at` | TIMESTAMPTZ | No | `now()` | |
+| `updated_at` | TIMESTAMPTZ | No | `now()` | Set by the service on each change |
 
 **Constraints & indexes:** `key` unique · CHECK `type IN ('NAV','DETAIL')` · FK `parent_id` →
 `menus`. "NAV has no parent, DETAIL has a NAV parent" is checked by the service (S5 rule b).
@@ -86,7 +88,7 @@ Which role sees which menu (soft control).
 |--------|------|------|---------|-------------|
 | `role_id` | UUID | No | — | → `roles.id` |
 | `menu_id` | UUID | No | — | → `menus.id` |
-| `created_at` | TIMESTAMPTZ | No | (confirmed in S2) | |
+| `created_at` | TIMESTAMPTZ | No | `now()` | |
 
 **Constraints & indexes:** PK (`role_id`, `menu_id`) · index on `menu_id` (finding a menu's rows
 when it is deleted, S5; the PK only helps lookups that start with `role_id`).
@@ -100,7 +102,7 @@ access (B-34).
 |--------|------|------|---------|-------------|
 | `user_id` | UUID | No | — | → `users.id` |
 | `role_id` | UUID | No | — | → `roles.id` |
-| `created_at` | TIMESTAMPTZ | No | (confirmed in S2) | |
+| `created_at` | TIMESTAMPTZ | No | `now()` | |
 
 **Constraints & indexes:** PK (`user_id`, `role_id`) · index on `role_id` (the D10 `ROLE_IN_USE`
 check).
@@ -119,14 +121,18 @@ with R2DBC. Created only if missing; column widths copy the server seed
 | `uri_pattern` | VARCHAR(512) | No | — | Ant-style pattern, e.g. `/admin/v1/**` |
 | `description` | TEXT | Yes | — | |
 | `resource_category` | VARCHAR(255) | Yes | — | |
-| `created_at` | as the server seed | — | — | Exact type and default confirmed in S2 |
-| `updated_at` | as the server seed | — | — | Exact type and default confirmed in S2 |
+| `created_at` | TIMESTAMP (no time zone) | No | `now()` | Same as the server seed (D2) |
+| `updated_at` | TIMESTAMP (no time zone) | No | `now()` | Same as the server seed (D2) |
 
 **Constraints & indexes:** none added by us. The gateway's migration doc has
 `UNIQUE (permission_name, http_method, uri_pattern)` but the server seed doesn't; we follow the
 seed (D2 notes). Duplicates are prevented by the service (S11 rule b).
 
 Every role always has at least one row, `GET /admin/v1/me/menus` (D4, D6).
+
+New environment: run the gateway seed before this service starts for the first time. The seed
+inserts fixed ids 1–15 and skips ids already taken, so after our V2 it would silently drop its own
+first 5 rows (SPEC D2).
 
 ### 1.8 `audit_log`
 
@@ -144,7 +150,7 @@ delete method (S4).
 | `before` | JSONB | Yes | — | State before; null on create |
 | `after` | JSONB | Yes | — | State after; null on delete. Failure details for `*_FAILED` (§9.3) |
 | `ip_address` | VARCHAR(45) | Yes | — | First `X-Forwarded-For` entry, else the remote address; null outside a request |
-| `created_at` | TIMESTAMPTZ | No | (confirmed in S2) | |
+| `created_at` | TIMESTAMPTZ | No | `now()` | |
 
 **Constraints & indexes:** no FKs (so failure rows and `SYSTEM` rows never break on a missing
 user) · index (`entity_type`, `entity_id`) · index `created_at`.
@@ -210,40 +216,40 @@ drill-down routes (D14). `/events/source-comparison` is not seeded.
 |-----|-------|------|------|--------|--------------|------|
 | `dashboard` | Dashboard | `/` | NAV | — | 10 | `ChartBarIcon` |
 | `compliance` | Compliance | `/compliance` | NAV | — | 20 | `ClipboardDocumentCheckIcon` |
-| `facilities` * | Facilities | `/facilities` | NAV | — | 30 | `BuildingOffice2Icon` |
-| `practitioners` * | Practitioners | `/practitioners` | NAV | — | 40 | `UserGroupIcon` |
-| `deviations` * | Deviations | `/deviations` | NAV | — | 50 | `ExclamationTriangleIcon` |
+| `facilities` | Facilities | `/facilities` | NAV | — | 30 | `BuildingOffice2Icon` |
+| `practitioners` | Practitioners | `/practitioners` | NAV | — | 40 | `UserGroupIcon` |
+| `deviations` | Deviations | `/deviations` | NAV | — | 50 | `ExclamationTriangleIcon` |
 | `patients` | Patients | `/compliance/patients` | NAV | — | 60 | `ClipboardDocumentCheckIcon` |
-| `intelligence` * | Intelligence | `/intelligence` | NAV | — | 70 | `BoltIcon` |
-| `events` * | Events | `/events` | NAV | — | 80 | `SignalIcon` |
-| `ingestion` * | Ingestion | `/ingestion` | NAV | — | 90 | `CogIcon` |
+| `intelligence` | Intelligence | `/intelligence` | NAV | — | 70 | `BoltIcon` |
+| `events` | Events | `/events` | NAV | — | 80 | `SignalIcon` |
+| `ingestion` | Ingestion | `/ingestion` | NAV | — | 90 | `CogIcon` |
 | `exports` | Exports | `/exports` | NAV | — | 100 | `ArrowDownTrayIcon` |
-| `protocol-detail` | Protocol analytics † | `/compliance/protocols/:id` | DETAIL | `compliance` | † | † |
-| `patient-detail` | Patient detail † | `/compliance/patients/:id` | DETAIL | `patients` | † | † |
+| `protocol-detail` | Protocol analytics | `/compliance/protocols/:id` | DETAIL | `compliance` | 21 | — |
+| `patient-detail` | Patient detail | `/compliance/patients/:id` | DETAIL | `patients` | 61 | — |
 
-\* Planned key; the SPEC fixes only `dashboard`, `compliance`, `patients`, `exports`,
-`protocol-detail`, `patient-detail` (used in S7 / S12 tests). Confirmed in S2.
-† Label, `sort_order` and icon of the DETAIL rows confirmed in S2 (they have no sidebar entry).
+Keys not fixed by the SPEC follow the path (`/facilities` → `facilities`). DETAIL labels are named
+after their pages in `cce-insights-ui` (`ProtocolAnalytics`, `PatientDetail`); they have no icon,
+since they have no sidebar entry, and their `sort_order` comes right after the parent's.
 
 Patients is its own top-level NAV, as B-02 requires. All 12 are `is_active = true`.
 
 ### 2.2 Roles (1)
 
-| `name` | `display_name` | `is_system` | Menus |
-|--------|----------------|-------------|-------|
-| `SUPER_ADMIN` | (confirmed in S2) | `true` | none — an admin-console role; the admin UI sidebar is static (S2) |
+| `name` | `display_name` | `description` | `is_system` | Menus |
+|--------|----------------|---------------|-------------|-------|
+| `SUPER_ADMIN` | Super Admin | Full access to the admin API. | `true` | none — an admin-console role; the admin UI sidebar is static (S2) |
 
 ### 2.3 API permissions (5)
 
-| `permission_name` | `http_method` | `uri_pattern` |
-|-------------------|---------------|---------------|
-| `SUPER_ADMIN` | `GET` | `/admin/v1/**` |
-| `SUPER_ADMIN` | `POST` | `/admin/v1/**` |
-| `SUPER_ADMIN` | `PUT` | `/admin/v1/**` |
-| `SUPER_ADMIN` | `PATCH` | `/admin/v1/**` |
-| `SUPER_ADMIN` | `DELETE` | `/admin/v1/**` |
+| `permission_name` | `http_method` | `uri_pattern` | `description` | `resource_category` |
+|-------------------|---------------|---------------|---------------|---------------------|
+| `SUPER_ADMIN` | `GET` | `/admin/v1/**` | Read admin resources | Admin |
+| `SUPER_ADMIN` | `POST` | `/admin/v1/**` | Create admin resources | Admin |
+| `SUPER_ADMIN` | `PUT` | `/admin/v1/**` | Replace admin resources | Admin |
+| `SUPER_ADMIN` | `PATCH` | `/admin/v1/**` | Update admin resources | Admin |
+| `SUPER_ADMIN` | `DELETE` | `/admin/v1/**` | Delete admin resources | Admin |
 
-`description` / `resource_category` values confirmed in S2. The `GET` row also covers
+`id`, `created_at` and `updated_at` come from the table's defaults. The `GET` row also covers
 `GET /admin/v1/me/menus` (D6).
 
 ### 2.4 Rows written at startup (not Flyway)
@@ -438,6 +444,15 @@ answered in about 2 seconds instead of Hikari's default 30:
 |-----|-------|
 | `spring.datasource.hikari.connection-timeout` | `2000` ms |
 | `spring.datasource.hikari.validation-timeout` | `1000` ms |
+
+Flyway, fixed in `application.yml` (no env var). The same pattern as the other CCE services that
+share `ccedb` (e.g. matcher, protocol): that database is never empty, and each service keeps its own history.
+
+| Key | Value | Why |
+|-----|-------|-----|
+| `spring.flyway.baseline-on-migrate` | `true` | A database with tables but no history of ours is started, not refused |
+| `spring.flyway.baseline-version` | `0` | Nothing of ours counts as applied, so V1 and V2 both run (the default, 1, would skip V1) |
+| `spring.flyway.table` | `flyway_schema_history_admin` | Own history, apart from the other services' |
 
 ### 7.3 JWT
 

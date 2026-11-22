@@ -219,7 +219,7 @@ The menu tree for the union of the caller's roles (B-21). A console builds its s
 ```
 
 Menu keys, labels and icon values come from the S2 seed (D14 working default; icon = Heroicon
-name from `cce-insights-ui` `Sidebar.tsx`). Exact seed values are confirmed in S2.
+name from `cce-insights-ui` `Sidebar.tsx`). Exact seed values: data dictionary §2.1.
 
 ---
 

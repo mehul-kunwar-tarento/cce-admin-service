@@ -1,7 +1,7 @@
 # cce-admin-service — Design Docs
 
 Backend for the CCE v2 Admin Module: users, roles, menus and API permissions, kept in step
-with Keycloak. A spec-driven learning build, run locally.
+with Keycloak.
 
 ## Documentation
 

@@ -62,17 +62,19 @@ cce-admin-service/
     │   ├── java/org/openphc/cce/admin/…   # Layout: architecture-overview.md §6
     │   └── resources/
     │       ├── application.yml            # Environment-neutral defaults (S1)
-    │       └── application-local.yml      # Every localhost default (S1)
-    └── test/java/org/openphc/cce/admin/…  # Tests (§13)
+    │       ├── application-local.yml      # Every localhost default (S1)
+    │       └── db/migration/
+    │           ├── V1__schema.sql         # pgcrypto + 7 tables (S2)
+    │           └── V2__seed.sql           # 12 menus, SUPER_ADMIN, its 5 permission rows (S2)
+    └── test/
+        ├── java/org/openphc/cce/admin/…   # Tests (§13)
+        └── resources/db/gateway-api-permissions-seed.sql  # Copy of the gateway's server seed (S2)
 ```
 
 Planned additions (sub-task in brackets):
 
 ```
 cce-admin-service/
-├── src/main/resources/db/migration/
-│   ├── V1__schema.sql                     # 7 tables (S2)
-│   └── V2__seed.sql                       # 12 menus, SUPER_ADMIN (S2)
 └── local/
     ├── gateway.env.example                # Env vars for the local gateway, no secrets (S13)
     └── scenarios/
@@ -94,13 +96,13 @@ has today; later rows are planned. Versions not written here come from the Sprin
 | `org.postgresql:postgresql` (runtime) | Database driver | S1 |
 | `org.springdoc:springdoc-openapi-starter-webmvc-ui` 2.8.13 | Swagger UI + `/v3/api-docs` | S1 |
 | `spring-boot-starter-test` | JUnit 5, MockMvc, Mockito, AssertJ | S1 |
-| Flyway | `V1__schema.sql`, `V2__seed.sql` | S2 |
-| Testcontainers (Postgres) | `MigrationTest` | S2 |
+| `org.flywaydb:flyway-core` + `flyway-database-postgresql` (11.7.2) | Runs `db/migration` at startup; Postgres support is a separate module since Flyway 10 | S2 |
+| `spring-boot-testcontainers`, `org.testcontainers:junit-jupiter` + `postgresql` (1.21.4) | Throwaway Postgres for the migration tests. Pinned to 1.21.4 (`ext['testcontainers.version']`): Spring Boot 3.5.6's 1.21.3 is rejected by Docker 29 | S2 |
 | `spring-boot-starter-oauth2-resource-server` | JWT validation via JWKS | S3 |
 | `org.keycloak:keycloak-admin-client` | Keycloak Admin API | S2a |
 | WireMock | Fake gateway in tests | S6a |
 
-S1 deliberately has no security (S3) and no Flyway (S2) yet.
+No security yet (S3).
 
 ## 5. Settings (`.env`)
 
@@ -158,8 +160,8 @@ and no `local` profile: every value comes from an environment variable.
 | `cce-admin-postgres` | `postgres:16` | `127.0.0.1:5434` | `postgres-data` |
 | `cce-admin-keycloak` | `quay.io/keycloak/keycloak:26.5.4` (same as `deploy-scripts`) | `127.0.0.1:8180` | `keycloak-data` |
 
-- Postgres holds only the service's database `admin_service`. It is empty until the service's
-  Flyway migrations run (S2).
+- Postgres holds only the service's database `admin_service`. Flyway creates the tables on the
+  service's first start (S2).
 - Keycloak runs in `start-dev` mode and keeps its own data in its built-in database
   (in the `keycloak-data` volume), not in Postgres.
 - Both have health checks; `docker compose ps` shows `healthy` when they are ready
@@ -325,7 +327,7 @@ curl -s http://localhost:8085/admin/v1/me -H "Authorization: Bearer $TOKEN" | jq
 | Kind | How | Sub-task |
 |------|-----|----------|
 | Service-layer tests | `KeycloakClient` and `GatewaySyncClient` mocked, so "Keycloak worked, DB failed" can be tested without a real Keycloak (PRD §9 "Testability") | S2a onwards |
-| Migration test | `MigrationTest` runs Flyway on a Testcontainers Postgres — **Docker must be running** | S2 |
+| Migration tests | `MigrationTest` runs Flyway on a Testcontainers Postgres; `MigrationOverGatewayTableTest` loads the gateway's seed first, then migrates twice — **Docker must be running** | S2 |
 | Gateway client test | WireMock plays the gateway: 200 / 206 / 500 / refused / timeout | S6a |
 | Audit assertion | `AuditAssert.exactlyOneRow(action, entityId)`: every mutating endpoint has a test that asserts exactly one `audit_log` row (B-50) | S4 onwards |
 | Error-handler / security tests | Test-only controllers under `src/test` | S1, S3 |
@@ -348,7 +350,8 @@ Every acceptance criterion in SPEC §4 names the test that proves it.
 | `superadmin`'s token gets 403 `FORBIDDEN` (planned, S2a / S3) | Not linked yet. Check the startup log for the bootstrap ERROR (`create superadmin in Keycloak first`, missing `SUPER_ADMIN` role, no email) and that `BOOTSTRAP_ADMIN_USERNAME` is set; fix, then restart the service. After a Keycloak reset, `superadmin` has a new id — reset the DB too |
 | Creating a role or saving permissions returns 502 `Gateway not reachable at http://localhost:8095` (planned, S6 / S11) | The local gateway isn't running. The DB change is saved; start the gateway (§10.1) and call `POST /admin/v1/roles/{id}/sync` |
 | Reset password returns 502 locally (planned, S10) | S0's Keycloak has no mail server. Expected locally; tests mock Keycloak |
-| `./gradlew build` fails in `MigrationTest` (planned, S2) | Docker isn't running; Testcontainers needs it |
+| `./gradlew build` fails in `MigrationTest` | Docker isn't running; Testcontainers needs it |
+| `client version 1.32 is too old` in a migration test | Docker 29 needs Testcontainers 1.21.4 or newer, pinned in `build.gradle`. Keep the pin until Spring Boot brings a newer version |
 
 ---
 
