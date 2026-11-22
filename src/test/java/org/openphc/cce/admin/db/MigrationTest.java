@@ -3,7 +3,9 @@ package org.openphc.cce.admin.db;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
@@ -13,6 +15,7 @@ import org.springframework.boot.testcontainers.service.connection.ServiceConnect
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.AntPathMatcher;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -75,6 +78,78 @@ class MigrationTest {
 		assertThat(columnDefault("api_permissions", "id")).startsWith("nextval(");
 	}
 
+	// ---- seed ----
+
+	@Test
+	void flywayAppliedVersion2() {
+		Boolean success = jdbc.queryForObject(
+				"SELECT success FROM flyway_schema_history WHERE version = '2'", Boolean.class);
+		assertThat(success).isTrue();
+	}
+
+	@Test
+	void seedHasTheTwelveMenusExactly() {
+		// key | label | path | type | parent key | sort_order | icon   ("-" = none)
+		assertThat(menuRowsAsText()).containsExactly(
+				"dashboard|Dashboard|/|NAV|-|10|ChartBarIcon",
+				"compliance|Compliance|/compliance|NAV|-|20|ClipboardDocumentCheckIcon",
+				"protocol-detail|Protocol analytics|/compliance/protocols/:id|DETAIL|compliance|21|-",
+				"facilities|Facilities|/facilities|NAV|-|30|BuildingOffice2Icon",
+				"practitioners|Practitioners|/practitioners|NAV|-|40|UserGroupIcon",
+				"deviations|Deviations|/deviations|NAV|-|50|ExclamationTriangleIcon",
+				"patients|Patients|/compliance/patients|NAV|-|60|ClipboardDocumentCheckIcon",
+				"patient-detail|Patient detail|/compliance/patients/:id|DETAIL|patients|61|-",
+				"intelligence|Intelligence|/intelligence|NAV|-|70|BoltIcon",
+				"events|Events|/events|NAV|-|80|SignalIcon",
+				"ingestion|Ingestion|/ingestion|NAV|-|90|CogIcon",
+				"exports|Exports|/exports|NAV|-|100|ArrowDownTrayIcon");
+	}
+
+	@Test
+	void allSeededMenusAreActive() {
+		Integer inactive = jdbc.queryForObject("SELECT count(*) FROM menus WHERE is_active = false", Integer.class);
+		assertThat(inactive).isZero();
+	}
+
+	@Test
+	void superAdminIsTheOnlyRoleAndIsASystemRole() {
+		List<Map<String, Object>> roles = jdbc.queryForList("SELECT name, display_name, is_system FROM roles");
+		assertThat(roles).hasSize(1);
+		assertThat(roles.get(0).get("name")).isEqualTo("SUPER_ADMIN");
+		assertThat(roles.get(0).get("display_name")).isEqualTo("Super Admin");
+		assertThat(roles.get(0).get("is_system")).isEqualTo(true);
+	}
+
+	@Test
+	void superAdminHasFivePermissionRowsForTheWholeAdminApi() {
+		List<Map<String, Object>> rows = jdbc.queryForList(
+				"SELECT http_method, uri_pattern FROM api_permissions WHERE permission_name = 'SUPER_ADMIN'");
+		List<String> methods = new ArrayList<>();
+		for (Map<String, Object> row : rows) {
+			methods.add((String) row.get("http_method"));
+			assertThat(row.get("uri_pattern")).isEqualTo("/admin/v1/**");
+		}
+		assertThat(methods).containsExactlyInAnyOrder("GET", "POST", "PUT", "PATCH", "DELETE");
+	}
+
+	@Test
+	void superAdminGetRowCoversMeMenus() {
+		// Same pattern matching the gateway uses
+		String pattern = jdbc.queryForObject(
+				"SELECT uri_pattern FROM api_permissions WHERE permission_name = 'SUPER_ADMIN' AND http_method = 'GET'",
+				String.class);
+		assertThat(new AntPathMatcher().match(pattern, "/admin/v1/me/menus")).isTrue();
+	}
+
+	@Test
+	void tablesFilledLaterAreEmpty() {
+		String[] tables = { "users", "user_roles", "role_menus", "audit_log" };
+		for (String table : tables) {
+			Integer count = jdbc.queryForObject("SELECT count(*) FROM " + table, Integer.class);
+			assertThat(count).as(table).isZero();
+		}
+	}
+
 	// ---- the database rejects bad data ----
 
 	@Test
@@ -114,6 +189,28 @@ class MigrationTest {
 	}
 
 	// ---- helpers ----
+
+	/** Every menu as "key|label|path|type|parent key|sort_order|icon", in sidebar order; "-" for none. */
+	private List<String> menuRowsAsText() {
+		List<Map<String, Object>> rows = jdbc.queryForList(
+				"SELECT m.key, m.label, m.path, m.type, p.key AS parent_key, m.sort_order, m.icon"
+						+ " FROM menus m LEFT JOIN menus p ON p.id = m.parent_id ORDER BY m.sort_order");
+		List<String> lines = new ArrayList<>();
+		for (Map<String, Object> row : rows) {
+			String line = row.get("key") + "|" + row.get("label") + "|" + row.get("path") + "|" + row.get("type")
+					+ "|" + textOrDash(row.get("parent_key")) + "|" + row.get("sort_order")
+					+ "|" + textOrDash(row.get("icon"));
+			lines.add(line);
+		}
+		return lines;
+	}
+
+	private String textOrDash(Object value) {
+		if (value == null) {
+			return "-";
+		}
+		return value.toString();
+	}
 
 	private String columnType(String table, String column) {
 		return jdbc.queryForObject(
