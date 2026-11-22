@@ -280,7 +280,8 @@ src/test/
     ├── error/ErrorTestController.java, GlobalExceptionHandlerTest.java  # Test-only endpoints + every error case (S1)
     ├── api/EnvelopeTestController.java, EnvelopeTest.java          # Test-only endpoints + {data} / paging (S1)
     ├── config/OpenApiTest.java                    # Whole app without a database: /v3/api-docs, Swagger UI (S1)
-    ├── MigrationTest.java                         # Flyway on Testcontainers Postgres (S2)
+    ├── db/MigrationTest.java                      # Flyway on Testcontainers Postgres: tables, keys, constraints, seed (S2)
+    ├── db/MigrationOverGatewayTableTest.java      # Gateway seed loaded first, then our migrations; second run adds nothing (S2)
     ├── AuditAssert.java                           # exactlyOneRow(action, entityId) helper (S4)
     ├── …test-only controllers                     # Exercise security (S3)
     └── …                                          # Service tests with KeycloakClient and gateway mocked;
