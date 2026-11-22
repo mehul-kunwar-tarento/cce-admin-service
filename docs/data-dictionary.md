@@ -1,9 +1,11 @@
 # cce-admin-service — Data Dictionary
 
-> **Working default (D14).** PRD B-01 / B-02 say the tables and the 12-menu seed must match the
-> team's data dictionary, which we don't have yet (Q3). Until it arrives, the tables below are our
-> own column list (S2) and the menus come from `cce-insights-ui` (D14). When it arrives, it is
-> diffed against S2 and the differences are logged in SPEC §9.
+> **Compared with the team's data dictionary on 2026-11-19 (D14).** PRD B-01 / B-02 say the tables
+> and the 12-menu seed must match the team's data dictionary. The team's version arrived as Jay's
+> design docs (openphc/cce-admin-service PR #1) and was compared column by column on 2026-11-19.
+> This document stays the source for S2: its tables and the menus from `cce-insights-ui` are kept,
+> and one index was taken from Jay's version (`role_menus(menu_id)`). Differences and reasons are
+> in SPEC §9.
 
 ## 1. Database Tables
 
@@ -86,7 +88,8 @@ Which role sees which menu (soft control).
 | `menu_id` | UUID | No | — | → `menus.id` |
 | `created_at` | TIMESTAMPTZ | No | (confirmed in S2) | |
 
-**Constraints & indexes:** PK (`role_id`, `menu_id`).
+**Constraints & indexes:** PK (`role_id`, `menu_id`) · index on `menu_id` (finding a menu's rows
+when it is deleted, S5; the PK only helps lookups that start with `role_id`).
 
 ### 1.6 `user_roles`
 

@@ -17,3 +17,6 @@ spring:
       validation-timeout: 1000
   jpa:
     open-in-view: false
+    hibernate:
+      # Tables come only from Flyway migrations, never from Java classes
+      ddl-auto: none
