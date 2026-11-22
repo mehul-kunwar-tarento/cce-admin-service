@@ -15,6 +15,13 @@ spring:
       # Fail fast when the database is down (default is 30s), so /health and API calls answer quickly
       connection-timeout: 2000
       validation-timeout: 1000
+  flyway:
+    # ccedb on servers is shared and never empty (other services' tables, gateway's api_permissions),
+    # so start a history table there instead of refusing; version 0 means V1 and V2 still both run
+    baseline-on-migrate: true
+    baseline-version: 0
+    # Each service sharing the database keeps its own migration history
+    table: flyway_schema_history_admin
   jpa:
     open-in-view: false
     hibernate:

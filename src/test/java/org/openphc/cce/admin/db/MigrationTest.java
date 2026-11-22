@@ -41,7 +41,7 @@ class MigrationTest {
 	@Test
 	void flywayAppliedVersion1() {
 		Boolean success = jdbc.queryForObject(
-				"SELECT success FROM flyway_schema_history WHERE version = '1'", Boolean.class);
+				"SELECT success FROM flyway_schema_history_admin WHERE version = '1'", Boolean.class);
 		assertThat(success).isTrue();
 	}
 
@@ -49,7 +49,7 @@ class MigrationTest {
 	void allSevenTablesExist() {
 		List<String> tables = jdbc.queryForList(
 				"SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'"
-						+ " AND table_name <> 'flyway_schema_history'", String.class);
+						+ " AND table_name <> 'flyway_schema_history_admin'", String.class);
 		assertThat(tables).containsExactlyInAnyOrder(
 				"users", "roles", "menus", "role_menus", "user_roles", "api_permissions", "audit_log");
 	}
@@ -83,7 +83,7 @@ class MigrationTest {
 	@Test
 	void flywayAppliedVersion2() {
 		Boolean success = jdbc.queryForObject(
-				"SELECT success FROM flyway_schema_history WHERE version = '2'", Boolean.class);
+				"SELECT success FROM flyway_schema_history_admin WHERE version = '2'", Boolean.class);
 		assertThat(success).isTrue();
 	}
 
