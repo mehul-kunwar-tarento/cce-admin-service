@@ -37,3 +37,8 @@ spring:
     hibernate:
       # Tables come only from Flyway migrations, never from Java classes
       ddl-auto: none
+
+cce:
+  jwt:
+    # Where the token keeps the caller's roles; the gateway must read the same path for the same realm
+    roles-claim-path: ${JWT_ROLES_CLAIM_PATH:realm_access.roles}
