@@ -42,6 +42,8 @@ public class RequiredSettingsCheck implements ApplicationListener<ApplicationEnv
 		required.put("spring.datasource.url", "DB_URL");
 		required.put("spring.datasource.username", "DB_USERNAME");
 		required.put("spring.datasource.password", "DB_PASSWORD");
+		required.put("spring.security.oauth2.resourceserver.jwt.issuer-uri", "JWT_ISSUER");
+		required.put("spring.security.oauth2.resourceserver.jwt.audiences", "JWT_AUDIENCE");
 		return required;
 	}
 

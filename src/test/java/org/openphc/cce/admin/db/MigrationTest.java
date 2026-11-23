@@ -24,7 +24,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * Runs the Flyway migrations on a real, throwaway Postgres (Docker) and checks the result.
  * Each test runs in a transaction that is rolled back, so tests never see each other's rows.
  */
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
+// The whole app starts (security included), so the JWT settings need values
+@SpringBootTest(properties = { "JWT_ISSUER=http://test-keycloak/realms/cce", "JWT_AUDIENCE=cce-admin-service" })
 @Testcontainers
 @Transactional
 class MigrationTest {

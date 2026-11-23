@@ -49,8 +49,8 @@ One authenticated request, e.g. `PUT /admin/v1/roles/{id}` (S3, S4, D7).
 ```mermaid
 sequenceDiagram
     participant C as Caller
-    participant JWT as JWT decoder<br/>+ AudienceValidator
-    participant RC as RolesClaimConverter
+    participant JWT as Spring Boot<br/>JWT decoder
+    participant RC as RolesClaimReader
     participant AU as ActiveUserFilter
     participant Ctrl as Controller
     participant Svc as Service
@@ -69,7 +69,7 @@ sequenceDiagram
     RC->>AU: authenticated
     AU->>DB: users WHERE keycloak_id = sub
     alt no row, or status INACTIVE / LOCKED
-        AU-->>C: 403 FORBIDDEN
+        AU-->>C: 403 FORBIDDEN "not set up" / "not active"
     end
     opt auth_time newer than last_login_at (D7)
         AU->>DB: UPDATE users.last_login_at
@@ -184,7 +184,7 @@ D12: every error, planned or not, leaves as `{error:{code,message}}`.
 flowchart TD
     A[Request] --> S{"Spring Security<br/>passes?"}
     S -->|"no / bad token"| H401["JsonAuthEntryPoint<br/>401 UNAUTHENTICATED"]
-    S -->|"not a local ACTIVE user"| H403["JsonAccessDeniedHandler<br/>403 FORBIDDEN"]
+    S -->|"not a local ACTIVE user"| H403["ActiveUserFilter<br/>403 FORBIDDEN"]
     S -->|Yes| R{"Route found?"}
 
     R -->|"unknown URL"| N404["404 NOT_FOUND"]

@@ -15,6 +15,16 @@ spring:
       # Fail fast when the database is down (default is 30s), so /health and API calls answer quickly
       connection-timeout: 2000
       validation-timeout: 1000
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          # Tokens must come from this Keycloak realm
+          issuer-uri: ${JWT_ISSUER}
+          # and be meant for this service: the token's aud must contain this value
+          audiences: ${JWT_AUDIENCE}
+          # Keycloak's public keys; fetched on the first token and cached, not at startup
+          jwk-set-uri: ${JWT_JWK_SET_URI:${JWT_ISSUER}/protocol/openid-connect/certs}
   flyway:
     # ccedb on servers is shared and never empty (other services' tables, gateway's api_permissions),
     # so start a history table there instead of refusing; version 0 means V1 and V2 still both run
@@ -27,3 +37,8 @@ spring:
     hibernate:
       # Tables come only from Flyway migrations, never from Java classes
       ddl-auto: none
+
+cce:
+  jwt:
+    # Where the token keeps the caller's roles; the gateway must read the same path for the same realm
+    roles-claim-path: ${JWT_ROLES_CLAIM_PATH:realm_access.roles}

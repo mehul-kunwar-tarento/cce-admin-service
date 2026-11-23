@@ -7,16 +7,23 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import org.junit.jupiter.api.Test;
 import org.openphc.cce.admin.health.DatabaseCheck;
+import org.openphc.cce.admin.repository.UserRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
-/** The whole app without a database, so Swagger is checked as it really runs. */
-@SpringBootTest(properties = "spring.autoconfigure.exclude="
-		+ "org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration,"
-		+ "org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration")
+/**
+ * The whole app without a database, so Swagger is checked as it really runs, security included:
+ * the docs open without a token.
+ */
+@SpringBootTest(properties = {
+		"spring.autoconfigure.exclude="
+				+ "org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration,"
+				+ "org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration",
+		"JWT_ISSUER=http://test-keycloak/realms/cce",
+		"JWT_AUDIENCE=cce-admin-service" })
 @AutoConfigureMockMvc
 class OpenApiTest {
 
@@ -25,6 +32,10 @@ class OpenApiTest {
 
 	@MockitoBean
 	private DatabaseCheck databaseCheck;
+
+	// No database here, so the local-user check gets a stand-in; the docs are open and never use it
+	@MockitoBean
+	private UserRepository userRepository;
 
 	@Test
 	void apiDocsHaveOurTitleAndListHealth() throws Exception {

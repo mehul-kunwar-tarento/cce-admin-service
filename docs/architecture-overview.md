@@ -179,6 +179,7 @@ org/openphc/cce/admin/
 │   ├── ErrorCode.java                             #   PRD Appendix B codes + D12 codes (S1); USERNAME_IN_USE (S8)
 │   ├── ApiException.java                          #   (status, code, message) thrown on purpose (S1)
 │   ├── ErrorResponse.java                         #   {error:{code,message}} (S1)
+│   ├── ErrorResponseWriter.java                   #   Writes that body from code that runs before any controller (S3)
 │   └── GlobalExceptionHandler.java                #   @RestControllerAdvice: D12 mapping, reference id on 500 (S1)
 │
 ├── health/
@@ -187,29 +188,27 @@ org/openphc/cce/admin/
 │   └── DatabaseCheck.java                         #   Pool connection + isValid(1s); never throws (S1)
 │
 ├── config/                                        # Spring configuration
-│   ├── RequiredSettingsCheck.java                 #   Stops startup naming any missing or empty DB_URL / DB_USERNAME / DB_PASSWORD (S1)
+│   ├── RequiredSettingsCheck.java                 #   Stops startup naming any missing or empty DB_URL / DB_USERNAME / DB_PASSWORD (S1), JWT_ISSUER / JWT_AUDIENCE (S3)
 │   ├── OpenApiConfig.java                         #   Swagger UI + /v3/api-docs, title "CCE Admin Service API" v1 (S1)
-│   ├── SecurityConfig.java                        #   Stateless; open paths; everything else authenticated (S3)
-│   ├── JwtProperties.java                         #   JWT_ISSUER, JWT_AUDIENCE, JWT_JWK_SET_URI, JWT_ROLES_CLAIM_PATH (S3)
+│   ├── SecurityConfig.java                        #   Stateless; open paths; token check, then ActiveUserFilter (S3)
 │   ├── KeycloakProperties.java                    #   KEYCLOAK_BASE_URL, _REALM, _CLIENT_ID, _CLIENT_SECRET; 10s timeout (S2a)
 │   └── GatewayProperties.java                     #   GATEWAY_BASE_URL (S6a)
 │
 ├── security/                                      # Per-request identity
-│   ├── AudienceValidator.java                     #   Checks aud (Spring does not by itself) (S3)
-│   ├── RolesClaimConverter.java                   #   Roles from a dot-notation claim path (S3)
-│   ├── ActiveUserFilter.java                      #   sub → users row, ACTIVE check, CurrentUser, last_login_at (S3, D7)
-│   ├── CurrentUser.java                           #   id, username, roles (S3; package confirmed in S3)
-│   ├── JsonAuthEntryPoint.java                    #   401 in the B-03 shape (S3)
-│   └── JsonAccessDeniedHandler.java               #   403 in the B-03 shape (S3)
+│   ├── JsonAuthEntryPoint.java                    #   401 in the B-03 shape (S3); signature, iss, aud, exp are checked by Spring Boot
+│   ├── RolesClaimReader.java                      #   Roles from a dot-notation claim path, JWT_ROLES_CLAIM_PATH (S3)
+│   ├── ActiveUserFilter.java                      #   sub → users row, ACTIVE check, 403 "not set up" / "not active", CurrentUser (S3)
+│   ├── LastLoginRecorder.java                     #   last_login_at from auth_time, only if later; never blocks (S3, D7)
+│   └── CurrentUser.java                           #   id, username, roles; CurrentUser.get(request) (S3)
 │
 ├── entity/                                        # JPA entities for the 7 tables
-│   ├── User.java                                  #   (S3)
+│   ├── User.java, UserStatus.java                 #   (S3)
 │   ├── AuditLog.java                              #   (S4)
 │   ├── Menu.java, RoleMenu.java                   #   (S5)
 │   └── Role.java, ApiPermission.java, UserRole.java   # ApiPermission.id is Long (S6, D1)
 │
 ├── repository/                                    # Spring Data JPA
-│   ├── UserRepository.java                        #   (S3)
+│   ├── UserRepository.java                        #   findByKeycloakId, moveLastLoginForward (S3)
 │   ├── AuditLogRepository.java                    #   insert + read only, no update/delete (S4)
 │   ├── MenuRepository.java, RoleMenuRepository.java   # (S5)
 │   └── …Role / ApiPermission / UserRole repositories  # (names confirmed in S6)
@@ -275,7 +274,7 @@ src/main/resources/
 ```
 src/test/
 └── java/org/openphc/cce/admin/
-    ├── ConfigFailFastTest.java                    # Missing / empty DB_URL stops startup (S1)
+    ├── ConfigFailFastTest.java                    # Missing / empty DB_URL (S1), JWT_ISSUER / JWT_AUDIENCE (S3) stops startup
     ├── health/DatabaseCheckTest.java, HealthControllerTest.java   # (S1)
     ├── error/ErrorTestController.java, GlobalExceptionHandlerTest.java  # Test-only endpoints + every error case (S1)
     ├── api/EnvelopeTestController.java, EnvelopeTest.java          # Test-only endpoints + {data} / paging (S1)
@@ -283,7 +282,12 @@ src/test/
     ├── db/MigrationTest.java                      # Flyway on Testcontainers Postgres: tables, keys, constraints, seed (S2)
     ├── db/MigrationOverGatewayTableTest.java      # Gateway seed loaded first, then our migrations; second run adds nothing (S2)
     ├── AuditAssert.java                           # exactlyOneRow(action, entityId) helper (S4)
-    ├── …test-only controllers                     # Exercise security (S3)
+    ├── security/TestTokens.java                   # Own key pair + JWKS server; signs good and bad test tokens (S3)
+    ├── security/SecurityTestController.java       # Test-only /test/secure, /test/current-user (S3)
+    ├── security/TokenCheckTest.java               # 401 cases, open paths (S3)
+    ├── security/ActiveUserCheckTest.java          # 403 cases, CurrentUser, last_login_at on real Postgres (S3)
+    ├── security/ActiveUserEdgeCasesTest.java      # Client-roles path; DB failure → 500; failed login update → 200 (S3)
+    ├── security/RolesClaimReaderTest.java, LastLoginRecorderTest.java  # Unit tests (S3)
     └── …                                          # Service tests with KeycloakClient and gateway mocked;
                                                    # WireMock as the fake gateway (S6a)
 ```
@@ -294,9 +298,9 @@ src/test/
 
 | Step | Component | Description |
 |------|-----------|-------------|
-| 1 | JWT decoder + `AudienceValidator` | Signature via JWKS, `iss`, `aud`, expiry. Fails → 401 `UNAUTHENTICATED` (B-10) |
-| 2 | `RolesClaimConverter` | Reads the token's roles from `JWT_ROLES_CLAIM_PATH` (default `realm_access.roles`). Missing claim → empty list, not a rejection (B-11) |
-| 3 | `ActiveUserFilter` | `sub` → `users` row with status ACTIVE, else 403 `FORBIDDEN` (B-12). Updates `last_login_at` from `auth_time` if newer (D7). Puts `CurrentUser` on the request |
+| 1 | Spring Boot's JWT decoder | Signature via JWKS, `iss`, `aud`, expiry (`spring.security.oauth2.resourceserver.jwt.*`). Fails → 401 `UNAUTHENTICATED` via `JsonAuthEntryPoint` (B-10) |
+| 2 | `RolesClaimReader` | Reads the token's roles from `JWT_ROLES_CLAIM_PATH` (default `realm_access.roles`). Missing claim → empty list, not a rejection (B-11) |
+| 3 | `ActiveUserFilter` | `sub` → `users` row with status ACTIVE, else 403 `FORBIDDEN` (B-12). `LastLoginRecorder` moves `last_login_at` to `auth_time` if newer (D7). Puts `CurrentUser` on the request. A DB failure here → 500 via `GlobalExceptionHandler` |
 | 4 | Controller | Parses and validates the body (bean validation → 400), calls the service, wraps the result in `{data, pagination?}` |
 | 5 | Service: checks | Read-only checks in a fixed order (404 → 409 → 400). The first failure stops; nothing is written yet |
 | 6 | Service: write | One DB transaction: rows + exactly one `AuditWriter.record()` row. Keycloak calls for user changes run inside it (S9, S10) |
@@ -361,14 +365,17 @@ Full contract: [API Reference](api-reference.md).
 
 ## 10. Error Handling Strategy
 
-401 and 403 are written by Spring Security's `JsonAuthEntryPoint` / `JsonAccessDeniedHandler`
-(they answer before the controller runs, S3); everything else by `GlobalExceptionHandler` (S1).
+401 is written by `JsonAuthEntryPoint` and 403 by `ActiveUserFilter`, both through
+`ErrorResponseWriter` (they answer before the controller runs, S3); everything else by
+`GlobalExceptionHandler` (S1). Security answers before the URL is looked up, so an unknown URL gives
+401 without a token, 403 to a genuine token of a non-local user, and 404 only to an ACTIVE user.
 Every body is `{error:{code,message}}`; Spring's default error body never reaches a caller (D12).
 
 | Scenario | Action | HTTP Status |
 |----------|--------|-------------|
 | Missing, invalid or expired token | Fixed message `Missing or invalid token.`; reason in a DEBUG log | 401 `UNAUTHENTICATED` |
-| Caller not in `users`, or INACTIVE / LOCKED | Reject | 403 `FORBIDDEN` |
+| Caller not in `users`, or INACTIVE / LOCKED | Reject; `not set up` / `not active` message | 403 `FORBIDDEN` |
+| Database fails during the local-user check | Handed to `GlobalExceptionHandler`: reference id, ERROR log | 500 `INTERNAL_ERROR` |
 | Broken JSON, wrong field type, failed bean validation | Reject, nothing written | 400 `VALIDATION_ERROR` |
 | Business rule broken (e.g. empty permission list D4, `/me/menus` row missing D6, role rename D9, own status/roles S10) | Reject before any write, message explains | 400 `VALIDATION_ERROR` |
 | Unknown user / role / menu id | Reject | 404 `USER_NOT_FOUND` / `ROLE_NOT_FOUND` / `MENU_NOT_FOUND` |
@@ -390,7 +397,7 @@ Nothing is retried automatically (B-32). Exact messages: [API Reference — §4]
 
 | Concern | Mechanism |
 |---------|-----------|
-| **JWT signature, issuer, audience, expiry** | Checked by the gateway **and** by this service (B-10). `aud` is checked by `AudienceValidator` |
+| **JWT signature, issuer, audience, expiry** | Checked by the gateway **and** by this service (B-10). `aud` is checked by Spring Boot when `spring.security.oauth2.resourceserver.jwt.audiences` is set |
 | **Which role may call which method + URI** | The gateway only, from `api_permissions`. No per-URL role check in this service |
 | **Caller is a local ACTIVE user** | This service only (B-12). Blocks a deactivated user whose token hasn't expired yet |
 | **Open paths** | `/admin/v1/health`, `/swagger-ui/**`, `/v3/api-docs/**` (they show the API shape only; calls still need a token) |
