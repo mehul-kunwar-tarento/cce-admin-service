@@ -98,11 +98,10 @@ has today; later rows are planned. Versions not written here come from the Sprin
 | `spring-boot-starter-test` | JUnit 5, MockMvc, Mockito, AssertJ | S1 |
 | `org.flywaydb:flyway-core` + `flyway-database-postgresql` (11.7.2) | Runs `db/migration` at startup; Postgres support is a separate module since Flyway 10 | S2 |
 | `spring-boot-testcontainers`, `org.testcontainers:junit-jupiter` + `postgresql` (1.21.4) | Throwaway Postgres for the migration tests. Pinned to 1.21.4 (`ext['testcontainers.version']`): Spring Boot 3.5.6's 1.21.3 is rejected by Docker 29 | S2 |
-| `spring-boot-starter-oauth2-resource-server` | JWT validation via JWKS | S3 |
+| `spring-boot-starter-oauth2-resource-server` | JWT validation via JWKS: signature, `iss`, `aud`, `exp` | S3 |
 | `org.keycloak:keycloak-admin-client` | Keycloak Admin API | S2a |
 | WireMock | Fake gateway in tests | S6a |
 
-No security yet (S3).
 
 ## 5. Settings (`.env`)
 
@@ -346,10 +345,11 @@ Every acceptance criterion in SPEC §4 names the test that proves it.
 | `get-token.sh`: `login failed for superadmin` | User missing (e.g. after a reset) or wrong password. Run `./local/create-superadmin.sh` |
 | Token has no `auth_time` | It came from a password-grant login. In Keycloak 26.5.4 only a browser-style login sets `auth_time`. Use `get-token.sh` |
 | `create-superadmin.sh` prints `Logging into …` and `Created new user with id …` | Info lines from Keycloak's `kcadm` tool, not errors |
-| Service won't start, error names `DB_URL`, `JWT_ISSUER` or `JWT_AUDIENCE` (planned, S1 / S3) | Started without the `local` profile. Use `SPRING_PROFILES_ACTIVE=local` |
+| Service won't start, error names `DB_URL`, `JWT_ISSUER` or `JWT_AUDIENCE` | Started without the `local` profile. Use `SPRING_PROFILES_ACTIVE=local` |
 | `superadmin`'s token gets 403 `FORBIDDEN` (planned, S2a / S3) | Not linked yet. Check the startup log for the bootstrap ERROR (`create superadmin in Keycloak first`, missing `SUPER_ADMIN` role, no email) and that `BOOTSTRAP_ADMIN_USERNAME` is set; fix, then restart the service. After a Keycloak reset, `superadmin` has a new id — reset the DB too |
 | Creating a role or saving permissions returns 502 `Gateway not reachable at http://localhost:8095` (planned, S6 / S11) | The local gateway isn't running. The DB change is saved; start the gateway (§10.1) and call `POST /admin/v1/roles/{id}/sync` |
 | Reset password returns 502 locally (planned, S10) | S0's Keycloak has no mail server. Expected locally; tests mock Keycloak |
+| Every call gets 401 `Missing or invalid token.` | No token, an expired one, one from another realm (`iss`), or one not meant for this service (`aud` without `cce-admin-service`). Get a fresh one with `get-token.sh`; the reason is in the DEBUG log of `JsonAuthEntryPoint` |
 | `./gradlew build` fails in `MigrationTest` | Docker isn't running; Testcontainers needs it |
 | `client version 1.32 is too old` in a migration test | Docker 29 needs Testcontainers 1.21.4 or newer, pinned in `build.gradle`. Keep the pin until Spring Boot brings a newer version |
 

@@ -861,11 +861,13 @@ exception text, SQL, stack trace, host or class name is ever put in `message`.
 | 500 | `INTERNAL_ERROR` | Anything unplanned (DB down, bug) | D12 (new) |
 | 502 | `KEYCLOAK_SYNC_FAILED` | A Keycloak or gateway call failed — read `message` for what was saved | PRD App. B |
 
-### 5.3 Fixed messages (400 / 401 / 409)
+### 5.3 Fixed messages (400 / 401 / 403 / 409)
 
 | Case | `message` |
 |------|-----------|
 | 401, any token problem | `Missing or invalid token.` — the actual reason is only in a DEBUG log |
+| 403, genuine token but no `users` row | `Your account is not set up in the admin service. Ask an administrator to add you.` |
+| 403, user INACTIVE or LOCKED | `Your account is not active. Ask an administrator to activate it.` |
 | Bean validation (body or query) | `Invalid request: <field> <rule>.`, every failing field, A–Z, joined by `; ` — e.g. `Invalid request: name must not be blank.`, `Invalid request: pageSize must be less than or equal to 100.` |
 | Value of the wrong type in a query parameter (`?page=abc`) | `Invalid request: page has an invalid value.` |
 | Broken JSON, missing body, wrong field type in the body | `Request body is not valid JSON, or a field has the wrong type.` |
@@ -948,7 +950,7 @@ reaches Keycloak or the gateway is caught as a 502 instead.
 | Who answers | Why | Body |
 |-------------|-----|------|
 | gateway-service | The caller's role has no `api_permissions` row for this method + URL | The gateway's own; not defined here |
-| cce-admin-service | Valid token, but the caller is not in `users` or not ACTIVE | `{"error":{"code":"FORBIDDEN", …}}` |
+| cce-admin-service | Valid token, but the caller is not in `users` or not ACTIVE | `{"error":{"code":"FORBIDDEN","message":"Your account is not set up …"}}` or `…"Your account is not active …"` (§5.3) |
 
 ---
 

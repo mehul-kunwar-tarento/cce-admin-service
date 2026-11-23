@@ -37,7 +37,7 @@ A local copy of each person who can log in; 1:1 with a Keycloak user.
 | `last_name` | VARCHAR(255) | Yes | — | Same as `first_name` |
 | `status` | VARCHAR(20) | No | — | `ACTIVE` / `INACTIVE` / `LOCKED` (§3) |
 | `facility_scope` | TEXT | Yes | — | Stored and shown only, not enforced (PRD) |
-| `last_login_at` | TIMESTAMPTZ | Yes | — | From the token's `auth_time` (D7) |
+| `last_login_at` | TIMESTAMPTZ | Yes | — | From the token's `auth_time` (D7). A login moves only this column, never `updated_at` |
 | `created_at` | TIMESTAMPTZ | No | `now()` | |
 | `updated_at` | TIMESTAMPTZ | No | `now()` | Set by the service on each change |
 
@@ -367,7 +367,8 @@ A `permissionName` in a row is ignored; rows are stored under the role's own nam
 
 ### 5.1 CurrentUser (S3)
 
-Built by `ActiveUserFilter` on every authenticated request.
+Built by `ActiveUserFilter` on every authenticated request and kept on the request; read it with
+`CurrentUser.get(request)` (`null` on open paths, where no checks run).
 
 | Field | Type | Source |
 |-------|------|--------|
@@ -386,7 +387,7 @@ do **not** use these token roles; they read `user_roles` (S12).
 | `iss` | Must equal `JWT_ISSUER` |
 | `aud` | Must contain `JWT_AUDIENCE` |
 | `exp` | Must be in the future |
-| `auth_time` | Moves `users.last_login_at` forward when newer (D7). Missing → unchanged, logged once |
+| `auth_time` | Moves `users.last_login_at` forward when newer (D7), with an UPDATE of that column only. Missing → unchanged, one INFO line per app start |
 | roles at `JWT_ROLES_CLAIM_PATH` | `CurrentUser.roles` (default `realm_access.roles`) |
 
 ## 6. Response Models
@@ -465,6 +466,13 @@ share `ccedb` (e.g. matcher, protocol): that database is never empty, and each s
 
 `JWT_ISSUER`, `JWT_AUDIENCE` and `JWT_ROLES_CLAIM_PATH` must match the gateway's values for the
 same realm (PRD §9). Local values were read from a real token (README, 2026-11-12).
+
+YAML keys: `spring.security.oauth2.resourceserver.jwt.issuer-uri` / `audiences` / `jwk-set-uri`
+(Spring Boot's own settings, which also check `aud`) and `cce.jwt.roles-claim-path`. Keycloak's public keys are
+fetched on the first token, not at startup, so the service starts while Keycloak is down. Locally,
+`application-local.yml` sets `JWT_ISSUER` and `JWT_AUDIENCE` themselves, since `jwk-set-uri` is built
+from `JWT_ISSUER`. Outside `local`, a missing or empty `JWT_ISSUER` / `JWT_AUDIENCE` stops startup
+(`RequiredSettingsCheck`).
 
 ### 7.4 Keycloak Admin API
 
