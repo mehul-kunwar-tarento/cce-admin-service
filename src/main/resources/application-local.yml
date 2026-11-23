@@ -8,3 +8,7 @@ spring:
     url: ${DB_URL:jdbc:postgresql://localhost:5434/admin_service}
     username: ${DB_USERNAME:admin_service}
     password: ${DB_PASSWORD:${POSTGRES_PASSWORD}}
+
+# Local values of the JWT_* variables: realm "cce" and the audience its tokens carry (README)
+JWT_ISSUER: http://localhost:8180/realms/cce
+JWT_AUDIENCE: cce-admin-service

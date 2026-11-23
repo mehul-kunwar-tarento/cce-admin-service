@@ -9,11 +9,15 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.test.json.JsonCompareMode;
 import org.springframework.test.web.servlet.MockMvc;
 
-@WebMvcTest(EnvelopeTestController.class)
+// The JWT settings must have values for the app to start, even with security filters off
+@WebMvcTest(controllers = EnvelopeTestController.class, properties = { "JWT_ISSUER=http://test-keycloak/realms/cce", "JWT_AUDIENCE=cce-admin-service" })
+// Security filters off: this test checks only the response envelope and paging; security is tested in TokenCheckTest
+@AutoConfigureMockMvc(addFilters = false)
 class EnvelopeTest {
 
 	@Autowired

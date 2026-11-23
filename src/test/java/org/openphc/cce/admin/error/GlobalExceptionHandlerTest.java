@@ -14,6 +14,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.openphc.cce.admin.health.DatabaseCheck;
 import org.openphc.cce.admin.health.HealthController;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
@@ -23,7 +24,11 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.ResultMatcher;
 
-@WebMvcTest(controllers = { ErrorTestController.class, HealthController.class })
+// The JWT settings must have values for the app to start, even with security filters off
+@WebMvcTest(controllers = { ErrorTestController.class, HealthController.class },
+		properties = { "JWT_ISSUER=http://test-keycloak/realms/cce", "JWT_AUDIENCE=cce-admin-service" })
+// Security filters off: this test checks only error handling; security is tested in TokenCheckTest
+@AutoConfigureMockMvc(addFilters = false)
 @ExtendWith(OutputCaptureExtension.class)
 class GlobalExceptionHandlerTest {
 
