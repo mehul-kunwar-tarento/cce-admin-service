@@ -91,13 +91,13 @@ class TokenCheckTest {
 		expect401(mockMvc.perform(get("/admin/v1/rolez")));
 	}
 
-	// ---- allowed ----
+	// ---- past the token check ----
 
 	@Test
-	void validTokenReachesTheEndpoint() throws Exception {
+	void validTokenPassesTheTokenCheck() throws Exception {
+		// 403, not 401: the token got past the token check; nobody is in users, so the local-user check says no
 		callWithToken(tokens.valid())
-				.andExpect(status().isOk())
-				.andExpect(content().string("ok"));
+				.andExpect(status().isForbidden());
 	}
 
 	@Test

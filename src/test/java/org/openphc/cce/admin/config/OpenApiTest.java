@@ -7,6 +7,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import org.junit.jupiter.api.Test;
 import org.openphc.cce.admin.health.DatabaseCheck;
+import org.openphc.cce.admin.repository.UserRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -31,6 +32,10 @@ class OpenApiTest {
 
 	@MockitoBean
 	private DatabaseCheck databaseCheck;
+
+	// No database here, so the local-user check gets a stand-in; the docs are open and never use it
+	@MockitoBean
+	private UserRepository userRepository;
 
 	@Test
 	void apiDocsHaveOurTitleAndListHealth() throws Exception {

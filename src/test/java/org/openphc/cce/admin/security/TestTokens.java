@@ -73,6 +73,16 @@ public class TestTokens {
 		return sign(claims().audience(audience).build(), key);
 	}
 
+	/** A valid token for the user with this Keycloak id (the token's sub). */
+	public String forUser(String keycloakId) {
+		return sign(claims().subject(keycloakId).build(), key);
+	}
+
+	/** A valid token for this user, with one extra claim, e.g. realm_access with roles. */
+	public String forUserWithClaim(String keycloakId, String claimName, Object claimValue) {
+		return sign(claims().subject(keycloakId).claim(claimName, claimValue).build(), key);
+	}
+
 	/** Looks right, but the signature is not from the key the app trusts. */
 	public String signedByAnotherKey() {
 		return sign(claims().build(), otherKey);
