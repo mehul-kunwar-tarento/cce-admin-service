@@ -4,6 +4,7 @@ import org.openphc.cce.admin.error.ErrorResponseWriter;
 import org.openphc.cce.admin.repository.UserRepository;
 import org.openphc.cce.admin.security.ActiveUserFilter;
 import org.openphc.cce.admin.security.JsonAuthEntryPoint;
+import org.openphc.cce.admin.security.LastLoginRecorder;
 import org.openphc.cce.admin.security.RolesClaimReader;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
@@ -30,7 +31,8 @@ public class SecurityConfig {
 	public SecurityFilterChain securityFilterChain(HttpSecurity http, JsonAuthEntryPoint authEntryPoint,
 			UserRepository userRepository, RolesClaimReader rolesClaimReader,
 			ErrorResponseWriter errorResponseWriter,
-			@Qualifier("handlerExceptionResolver") HandlerExceptionResolver exceptionResolver) throws Exception {
+			@Qualifier("handlerExceptionResolver") HandlerExceptionResolver exceptionResolver,
+			LastLoginRecorder lastLoginRecorder) throws Exception {
 		// No sessions or cookies: every request brings its own token, so CSRF protection isn't needed
 		http.csrf(csrf -> csrf.disable());
 		http.sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS));
@@ -49,7 +51,7 @@ public class SecurityConfig {
 		// The local-user check runs right after the token check. Created here, not as a bean,
 		// so it runs only inside this chain, once per request.
 		ActiveUserFilter activeUserFilter = new ActiveUserFilter(
-				userRepository, rolesClaimReader, errorResponseWriter, exceptionResolver);
+				userRepository, rolesClaimReader, errorResponseWriter, exceptionResolver, lastLoginRecorder);
 		http.addFilterAfter(activeUserFilter, BearerTokenAuthenticationFilter.class);
 
 		return http.build();

@@ -27,7 +27,8 @@ import org.springframework.web.servlet.HandlerExceptionResolver;
 /**
  * Second check on every protected request, after the token check: the token's sub must belong to a
  * local user whose status is ACTIVE, otherwise 403. A user deactivated a minute ago still has a valid
- * token, so only this table can stop them. The user who passes is put on the request as CurrentUser.
+ * token, so only this table can stop them. For the user who passes, the login time is recorded and
+ * the user is put on the request as CurrentUser.
  */
 public class ActiveUserFilter extends OncePerRequestFilter {
 
@@ -39,14 +40,17 @@ public class ActiveUserFilter extends OncePerRequestFilter {
 	private final RolesClaimReader rolesClaimReader;
 	private final ErrorResponseWriter errorResponseWriter;
 	private final HandlerExceptionResolver exceptionResolver;
+	private final LastLoginRecorder lastLoginRecorder;
 	private final AntPathMatcher pathMatcher = new AntPathMatcher();
 
 	public ActiveUserFilter(UserRepository userRepository, RolesClaimReader rolesClaimReader,
-			ErrorResponseWriter errorResponseWriter, HandlerExceptionResolver exceptionResolver) {
+			ErrorResponseWriter errorResponseWriter, HandlerExceptionResolver exceptionResolver,
+			LastLoginRecorder lastLoginRecorder) {
 		this.userRepository = userRepository;
 		this.rolesClaimReader = rolesClaimReader;
 		this.errorResponseWriter = errorResponseWriter;
 		this.exceptionResolver = exceptionResolver;
+		this.lastLoginRecorder = lastLoginRecorder;
 	}
 
 	/** Health and the API docs need no token, so they skip this check too. */
@@ -88,6 +92,8 @@ public class ActiveUserFilter extends OncePerRequestFilter {
 			errorResponseWriter.write(response, HttpStatus.FORBIDDEN, ErrorCode.FORBIDDEN, NOT_ACTIVE);
 			return;
 		}
+
+		lastLoginRecorder.record(user, token);
 
 		List<String> roles = rolesClaimReader.read(token);
 		CurrentUser.set(request, new CurrentUser(user.getId(), user.getUsername(), roles));

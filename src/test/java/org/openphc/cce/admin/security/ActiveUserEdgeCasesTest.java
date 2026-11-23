@@ -2,6 +2,7 @@ package org.openphc.cce.admin.security;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.contains;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -17,6 +18,7 @@ import com.jayway.jsonpath.JsonPath;
 
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.openphc.cce.admin.entity.User;
 import org.openphc.cce.admin.entity.UserStatus;
 import org.openphc.cce.admin.health.DatabaseCheck;
@@ -24,6 +26,8 @@ import org.openphc.cce.admin.repository.UserRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -33,7 +37,7 @@ import org.springframework.test.web.servlet.MvcResult;
 
 /**
  * Cases a real database can't easily show: roles read from another claim path, and the database
- * failing during the user lookup. The app runs without a database; the repository is a stand-in.
+ * failing during the user lookup or the login-time update. The app runs without a database; the repository is a stand-in.
  */
 @SpringBootTest(properties = {
 		"spring.autoconfigure.exclude="
@@ -41,6 +45,7 @@ import org.springframework.test.web.servlet.MvcResult;
 				+ "org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration",
 		"JWT_ROLES_CLAIM_PATH=resource_access.gateway-service.roles" })
 @AutoConfigureMockMvc
+@ExtendWith(OutputCaptureExtension.class)
 class ActiveUserEdgeCasesTest {
 
 	static TestTokens tokens = new TestTokens();
@@ -92,6 +97,20 @@ class ActiveUserEdgeCasesTest {
 		String message = JsonPath.read(result.getResponse().getContentAsString(), "$.error.message");
 		assertThat(message).containsPattern("report reference [0-9a-f]{8}\\.");
 		assertThat(message).doesNotContain("Connection refused");
+	}
+
+	@Test
+	void failedLoginUpdateStillAnswers200(CapturedOutput output) throws Exception {
+		User asha = activeUser("asha");
+		when(userRepository.findByKeycloakId("kc-asha")).thenReturn(Optional.of(asha));
+		when(userRepository.moveLastLoginForward(any(), any()))
+				.thenThrow(new DataAccessResourceFailureException("Connection refused"));
+
+		mockMvc.perform(get("/test/secure")
+						.header("Authorization", "Bearer " + tokens.forUserWithClaim("kc-asha", "auth_time", 1795400100L)))
+				.andExpect(status().isOk());
+
+		assertThat(output.getOut()).contains("WARN").contains("Could not update last_login_at");
 	}
 
 	/** A stand-in ACTIVE user; only the getters the filter reads are filled. */

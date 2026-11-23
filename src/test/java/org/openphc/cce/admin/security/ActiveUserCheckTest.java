@@ -1,11 +1,14 @@
 package org.openphc.cce.admin.security;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.contains;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.sql.Timestamp;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -127,6 +130,25 @@ class ActiveUserCheckTest {
 		callAs(tokens.forUser("kc-asha"), "/test/current-user")
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.roles").isEmpty());
+	}
+
+	// ---- login time ----
+
+	@Test
+	void loginTimeIsRecordedOnlyInLastLoginAt() throws Exception {
+		UUID id = insertUser("kc-asha", "asha", "ACTIVE");
+		Timestamp updatedAtBefore = jdbc.queryForObject("SELECT updated_at FROM users WHERE id = ?", Timestamp.class, id);
+		Instant loginTime = Instant.parse("2026-11-23T10:15:00Z");
+
+		callAs(tokens.forUserWithClaim("kc-asha", "auth_time", loginTime.getEpochSecond()), "/test/secure")
+				.andExpect(status().isOk());
+
+		Timestamp lastLoginAt = jdbc.queryForObject("SELECT last_login_at FROM users WHERE id = ?", Timestamp.class, id);
+		Timestamp updatedAtAfter = jdbc.queryForObject("SELECT updated_at FROM users WHERE id = ?", Timestamp.class, id);
+		Integer auditRows = jdbc.queryForObject("SELECT count(*) FROM audit_log", Integer.class);
+		assertThat(lastLoginAt.toInstant()).isEqualTo(loginTime);
+		assertThat(updatedAtAfter).as("a login is not a profile change").isEqualTo(updatedAtBefore);
+		assertThat(auditRows).as("a login writes no audit row").isZero();
 	}
 
 	@Test
