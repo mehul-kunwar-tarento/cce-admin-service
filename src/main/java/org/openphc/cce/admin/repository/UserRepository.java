@@ -16,6 +16,14 @@ public interface UserRepository extends JpaRepository<User, UUID> {
 	/** The user whose Keycloak id is the token's sub. */
 	Optional<User> findByKeycloakId(String keycloakId);
 
+	boolean existsByUsername(String username);
+
+	/** Gives the user a role by its name. Returns how many rows were added (0 = no role with that name). */
+	@Modifying
+	@Query(value = "INSERT INTO user_roles (user_id, role_id) SELECT :userId, id FROM roles WHERE name = :roleName",
+			nativeQuery = true)
+	int addRole(@Param("userId") UUID userId, @Param("roleName") String roleName);
+
 	/**
 	 * Moves last_login_at forward to the token's login time. Only that column changes (a login is not a
 	 * profile change), and only if the new time is later, so an older token never moves it back.

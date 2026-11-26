@@ -478,12 +478,14 @@ from `JWT_ISSUER`. Outside `local`, a missing or empty `JWT_ISSUER` / `JWT_AUDIE
 
 | Env var | Default | Local value | Required outside local | Sub-task |
 |---------|---------|-------------|------------------------|----------|
-| `KEYCLOAK_BASE_URL` | — | `http://localhost:8180` | Yes | S2a |
+| `KEYCLOAK_BASE_URL` | — | `http://localhost:8180` (in `application-local.yml`) | Yes | S2a |
 | `KEYCLOAK_REALM` | `cce` | — | No | S2a |
 | `KEYCLOAK_CLIENT_ID` | `cce-admin-service` | — | No | S2a |
 | `KEYCLOAK_CLIENT_SECRET` | — | — (secret; from `.env`) | Yes | S2a |
 
-Timeout: 10s (fixed, S2a).
+Timeout: 10s to connect and 10s to answer (fixed, `KeycloakAdminClient.TIMEOUT`). A missing
+`KEYCLOAK_BASE_URL` or `KEYCLOAK_CLIENT_SECRET` stops startup, naming it (`RequiredSettingsCheck`);
+Keycloak being down does not (D5).
 
 ### 7.5 Gateway
 
@@ -497,9 +499,10 @@ Timeout: 10s (fixed, D3).
 
 | Env var | Default | Local value | Required | Sub-task |
 |---------|---------|-------------|----------|----------|
-| `BOOTSTRAP_ADMIN_USERNAME` | — (unset → bootstrap does nothing) | `superadmin` (where it is set confirmed in S2a) | No | S2a |
+| `BOOTSTRAP_ADMIN_USERNAME` | — (unset → bootstrap does nothing) | `superadmin` (in `application-local.yml`) | No | S2a |
 
-The only bootstrap setting: no id, email or password in config (D5).
+The only bootstrap setting: no id, email or password in config (D5). It is trimmed and lowercased
+when read, as Keycloak stores usernames in lowercase, so `SuperAdmin` works the same as `superadmin`.
 
 ### 7.7 Local `.env` (S0)
 
@@ -566,7 +569,7 @@ Realm roles themselves are created and deleted by the gateway's sync, never by t
 
 | Action | Written by | `before` | `after` |
 |--------|------------|----------|---------|
-| `BOOTSTRAP_ADMIN_LINKED` | Startup (S2a) | null | confirmed in S2a |
+| `BOOTSTRAP_ADMIN_LINKED` | Startup (S2a) | null | `keycloakId`, `username`, `email`, `firstName`, `lastName`, `status` (`ACTIVE`), `roles` (`["SUPER_ADMIN"]`) |
 | `MENU_CREATED` | `POST /menus` (S5) | null | the menu |
 | `MENU_UPDATED` | `PUT /menus/{id}` (S5) | the menu | the menu |
 | `MENU_DELETED` | `DELETE /menus/{id}` (S5) | the menu + ids of roles that had it | null |

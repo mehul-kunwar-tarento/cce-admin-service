@@ -99,7 +99,7 @@ has today; later rows are planned. Versions not written here come from the Sprin
 | `org.flywaydb:flyway-core` + `flyway-database-postgresql` (11.7.2) | Runs `db/migration` at startup; Postgres support is a separate module since Flyway 10 | S2 |
 | `spring-boot-testcontainers`, `org.testcontainers:junit-jupiter` + `postgresql` (1.21.4) | Throwaway Postgres for the migration tests. Pinned to 1.21.4 (`ext['testcontainers.version']`): Spring Boot 3.5.6's 1.21.3 is rejected by Docker 29 | S2 |
 | `spring-boot-starter-oauth2-resource-server` | JWT validation via JWKS: signature, `iss`, `aud`, `exp` | S3 |
-| `org.keycloak:keycloak-admin-client` | Keycloak Admin API | S2a |
+| `org.keycloak:keycloak-admin-client` 26.0.13 | Keycloak Admin API (the 26.0 line is made for Keycloak 26 servers) | S2a |
 | WireMock | Fake gateway in tests | S6a |
 
 
@@ -299,12 +299,17 @@ Service (planned; sub-task in brackets):
 
 ```bash
 curl -s http://localhost:8085/admin/v1/health | jq                    # {"status":"UP","db":"UP"} (S1)
-curl -s -o /dev/null -w '%{http_code}\n' http://localhost:8085/swagger-ui.html   # 200 (S1)
+curl -s -o /dev/null -w '%{http_code}\n' http://localhost:8085/swagger-ui.html   # 302 to /swagger-ui/index.html (S1)
+# App log on the first start: INFO … bootstrap admin superadmin linked (S2a)
 
 TOKEN=$(./local/get-token.sh)
 curl -s http://localhost:8085/admin/v1/me -H "Authorization: Bearer $TOKEN" | jq
 # 200 with username "superadmin", roles ["SUPER_ADMIN"] (needs S2a + S12)
 ```
+
+In Swagger UI (`http://localhost:8085/swagger-ui/index.html`): **Authorize** → paste the output of
+`./local/get-token.sh` → Authorize → Close. Every "Try it out" then sends the token; it lasts 5
+minutes, then repeat (S2a).
 
 ## 12. Useful Gradle Commands
 

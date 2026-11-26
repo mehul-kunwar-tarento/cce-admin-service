@@ -28,8 +28,9 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * The audit row for a change, on a real Postgres. Each test opens its own transaction (no class-level
  * rollback), because "no transaction" and "rolled back" are what is being tested.
  */
-// The whole app starts (security included), so the JWT settings need values
-@SpringBootTest(properties = { "JWT_ISSUER=http://test-keycloak/realms/cce", "JWT_AUDIENCE=cce-admin-service" })
+// The whole app starts (security included), so the JWT and Keycloak settings need values
+@SpringBootTest(properties = { "JWT_ISSUER=http://test-keycloak/realms/cce", "JWT_AUDIENCE=cce-admin-service",
+		"KEYCLOAK_BASE_URL=http://test-keycloak", "KEYCLOAK_CLIENT_SECRET=test-secret" })
 @Testcontainers
 class AuditWriterTest {
 

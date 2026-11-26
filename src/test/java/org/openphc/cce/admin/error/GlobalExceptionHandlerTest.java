@@ -24,9 +24,10 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.ResultMatcher;
 
-// The JWT settings must have values for the app to start, even with security filters off
+// The JWT and Keycloak settings must have values for the app to start, even with security filters off
 @WebMvcTest(controllers = { ErrorTestController.class, HealthController.class },
-		properties = { "JWT_ISSUER=http://test-keycloak/realms/cce", "JWT_AUDIENCE=cce-admin-service" })
+		properties = { "JWT_ISSUER=http://test-keycloak/realms/cce", "JWT_AUDIENCE=cce-admin-service",
+		"KEYCLOAK_BASE_URL=http://test-keycloak", "KEYCLOAK_CLIENT_SECRET=test-secret" })
 // Security filters off: this test checks only error handling; security is tested in TokenCheckTest
 @AutoConfigureMockMvc(addFilters = false)
 @ExtendWith(OutputCaptureExtension.class)

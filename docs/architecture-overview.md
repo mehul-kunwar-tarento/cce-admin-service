@@ -188,10 +188,11 @@ org/openphc/cce/admin/
 │   └── DatabaseCheck.java                         #   Pool connection + isValid(1s); never throws (S1)
 │
 ├── config/                                        # Spring configuration
-│   ├── RequiredSettingsCheck.java                 #   Stops startup naming any missing or empty DB_URL / DB_USERNAME / DB_PASSWORD (S1), JWT_ISSUER / JWT_AUDIENCE (S3)
-│   ├── OpenApiConfig.java                         #   Swagger UI + /v3/api-docs, title "CCE Admin Service API" v1 (S1)
+│   ├── RequiredSettingsCheck.java                 #   Stops startup naming any missing or empty DB_URL / DB_USERNAME / DB_PASSWORD (S1), JWT_ISSUER / JWT_AUDIENCE (S3),
+│   │                                              #   KEYCLOAK_BASE_URL / KEYCLOAK_CLIENT_SECRET (S2a)
+│   ├── OpenApiConfig.java                         #   Swagger UI + /v3/api-docs, title "CCE Admin Service API" v1 (S1); Bearer JWT scheme → Authorize button (S2a)
 │   ├── SecurityConfig.java                        #   Stateless; open paths; token check, then ActiveUserFilter (S3)
-│   ├── KeycloakProperties.java                    #   KEYCLOAK_BASE_URL, _REALM, _CLIENT_ID, _CLIENT_SECRET; 10s timeout (S2a)
+│   ├── KeycloakProperties.java                    #   cce.keycloak.*: KEYCLOAK_BASE_URL, _REALM, _CLIENT_ID, _CLIENT_SECRET (S2a)
 │   └── GatewayProperties.java                     #   GATEWAY_BASE_URL (S6a)
 │
 ├── security/                                      # Per-request identity
@@ -208,7 +209,7 @@ org/openphc/cce/admin/
 │   └── Role.java, ApiPermission.java, UserRole.java   # ApiPermission.id is Long (S6, D1)
 │
 ├── repository/                                    # Spring Data JPA
-│   ├── UserRepository.java                        #   findByKeycloakId, moveLastLoginForward (S3)
+│   ├── UserRepository.java                        #   findByKeycloakId, moveLastLoginForward (S3); existsByUsername, addRole (S2a)
 │   ├── AuditLogRepository.java                    #   bare Repository: save, findById, findAll, count; no update/delete (S4)
 │   ├── MenuRepository.java, RoleMenuRepository.java   # (S5)
 │   └── …Role / ApiPermission / UserRole repositories  # (names confirmed in S6)
@@ -216,14 +217,15 @@ org/openphc/cce/admin/
 ├── client/                                        # Everything that leaves the service
 │   ├── KeycloakClient.java                        #   Interface: findUserByUsername, hasRealmRole (S2a); createUser, assignRealmRoles, deleteUser (S8);
 │   │                                              #   updateUser (S9); setEnabled/removeRealmRoles/sendUpdatePasswordEmail (S10)
-│   ├── KeycloakAdminClient.java                   #   Implementation on keycloak-admin-client, client_credentials (S2a)
+│   ├── KeycloakAdminClient.java                   #   Implementation on keycloak-admin-client, client_credentials, 10s connect / answer (S2a)
+│   ├── KeycloakException.java                     #   Any Keycloak failure; message names the URL, the step and the cause (S2a)
 │   ├── KeycloakUser.java                          #   id, username, email, firstName, lastName (S2a)
 │   ├── GatewaySyncClient.java                     #   Interface: sync(roleId) (S6a)
 │   ├── HttpGatewaySyncClient.java                 #   RestClient, no auth header, 10s timeout (S6a)
 │   └── GatewaySyncException.java                  #   Reason text → 502 KEYCLOAK_SYNC_FAILED (S6a)
 │
 ├── bootstrap/                                     # First admin (D5)
-│   ├── BootstrapAdminRunner.java                  #   ApplicationRunner: Keycloak lookup by username (S2a)
+│   ├── BootstrapAdminRunner.java                  #   ApplicationRunner: lowercased username, Keycloak lookup, ERROR + keep running on any failure (S2a)
 │   └── BootstrapAdminService.java                 #   One @Transactional insert: users + user_roles + audit (S2a)
 │
 ├── audit/
@@ -287,6 +289,8 @@ src/test/
     ├── audit/AuditLogRepositoryTest.java          # Rows read back with JSON; no update/delete method; saved row can't change (S4)
     ├── audit/AuditWriterTest.java                 # Real Postgres: row content, no transaction, rollback, actor, IP rules, failure rows (S4)
     ├── audit/AuditWriterFailureTest.java          # Insert or commit fails → recordFailure never throws, ERROR log has the details (S4)
+    ├── client/KeycloakAdminClientTest.java        # Keycloak down or silent → KeycloakException within the timeout (S2a)
+    ├── bootstrap/BootstrapAdminTest.java          # Real Postgres, Keycloak stand-in: every startup case, one transaction, lowercase (S2a)
     ├── security/TestTokens.java                   # Own key pair + JWKS server; signs good and bad test tokens (S3)
     ├── security/SecurityTestController.java       # Test-only /test/secure, /test/current-user (S3)
     ├── security/TokenCheckTest.java               # 401 cases, open paths (S3)

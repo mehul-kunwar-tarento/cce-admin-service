@@ -135,7 +135,8 @@ during a DB blip (S1).
 #### GET /swagger-ui.html · GET /v3/api-docs
 
 No token. Swagger UI and the OpenAPI 3 spec; every endpoint in this document is listed there
-(checked in S13).
+(checked in S13). The spec declares a Bearer JWT for every endpoint except health, so Swagger UI
+has an **Authorize** button: paste a token once and "Try it out" sends it (S2a).
 
 ---
 

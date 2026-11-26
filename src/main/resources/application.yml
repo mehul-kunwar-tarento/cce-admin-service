@@ -42,3 +42,13 @@ cce:
   jwt:
     # Where the token keeps the caller's roles; the gateway must read the same path for the same realm
     roles-claim-path: ${JWT_ROLES_CLAIM_PATH:realm_access.roles}
+  keycloak:
+    # Keycloak's address; required, the localhost value lives only in application-local.yml
+    base-url: ${KEYCLOAK_BASE_URL}
+    realm: ${KEYCLOAK_REALM:cce}
+    client-id: ${KEYCLOAK_CLIENT_ID:cce-admin-service}
+    # This service's own login to the Keycloak Admin API; from the environment, never written in a file
+    client-secret: ${KEYCLOAK_CLIENT_SECRET}
+  bootstrap:
+    # Keycloak user linked as the first admin on startup; unset = do nothing
+    admin-username: ${BOOTSTRAP_ADMIN_USERNAME:}

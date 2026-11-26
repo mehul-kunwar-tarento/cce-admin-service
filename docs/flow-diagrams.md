@@ -487,7 +487,9 @@ it (D8). Deactivation keeps `user_roles`, so re-activation restores the same acc
 
 ## 12. Bootstrap Admin at Startup
 
-`BootstrapAdminRunner`, after Flyway, on every start (D5, S2a). It never stops the service.
+`BootstrapAdminRunner`, after Flyway, on every start (D5, S2a). It never stops the service: any
+other failure (e.g. the database) is an ERROR with its stack trace, and nothing is saved. The
+username is lowercased first, as Keycloak stores it.
 
 ```mermaid
 flowchart TD
@@ -496,9 +498,9 @@ flowchart TD
     B -->|Yes| C{"users row with<br/>that username exists?"}
     C -->|Yes| SKIP2["Do nothing<br/>(linked on an earlier start)"]
     C -->|No| D["Keycloak: find user<br/>exact username match (10s timeout)"]
-    D -->|"unreachable / not found"| E1["ERROR 'create {username} in Keycloak first'<br/>no rows, keep running"]
+    D -->|"unreachable / not found"| E1["ERROR 'Bootstrap admin {username} not linked: …<br/>create {username} in Keycloak first, then restart'<br/>no rows, keep running"]
     D -->|found| F{"Has realm role<br/>SUPER_ADMIN?<br/>(effective roles)"}
-    F -->|No| E2["ERROR, no rows, keep running"]
+    F -->|No| E2["ERROR '… has no realm role SUPER_ADMIN'<br/>no rows, keep running"]
     F -->|Yes| G{"Has an email?"}
     G -->|No| E3["ERROR '{username} has no email in Keycloak'<br/>no rows, keep running"]
     G -->|Yes| T["One transaction:<br/>users (keycloak_id, username, email, names, ACTIVE)<br/>user_roles → SUPER_ADMIN<br/>audit BOOTSTRAP_ADMIN_LINKED, actor SYSTEM"]

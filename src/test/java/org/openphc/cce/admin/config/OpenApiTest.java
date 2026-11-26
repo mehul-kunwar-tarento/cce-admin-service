@@ -25,7 +25,8 @@ import org.springframework.test.web.servlet.MockMvc;
 				+ "org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration,"
 				+ "org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration",
 		"JWT_ISSUER=http://test-keycloak/realms/cce",
-		"JWT_AUDIENCE=cce-admin-service" })
+		"JWT_AUDIENCE=cce-admin-service",
+		"KEYCLOAK_BASE_URL=http://test-keycloak", "KEYCLOAK_CLIENT_SECRET=test-secret" })
 @AutoConfigureMockMvc
 class OpenApiTest {
 
@@ -52,6 +53,23 @@ class OpenApiTest {
 				.andExpect(jsonPath("$.info.title").value("CCE Admin Service API"))
 				.andExpect(jsonPath("$.info.version").value("v1"))
 				.andExpect(jsonPath("$.paths['/admin/v1/health'].get").exists());
+	}
+
+	@Test
+	void apiDocsDeclareABearerToken() throws Exception {
+		mockMvc.perform(get("/v3/api-docs"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.components.securitySchemes.bearerAuth.type").value("http"))
+				.andExpect(jsonPath("$.components.securitySchemes.bearerAuth.scheme").value("bearer"))
+				.andExpect(jsonPath("$.components.securitySchemes.bearerAuth.bearerFormat").value("JWT"))
+				.andExpect(jsonPath("$.security[0].bearerAuth").isArray());
+	}
+
+	@Test
+	void healthNeedsNoTokenInTheDocs() throws Exception {
+		mockMvc.perform(get("/v3/api-docs"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.paths['/admin/v1/health'].get.security").isEmpty());
 	}
 
 	@Test
