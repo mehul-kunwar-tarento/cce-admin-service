@@ -82,6 +82,15 @@ class OpenApiTest {
 	}
 
 	@Test
+	void menuChildrenAreDocumentedAsMenus() throws Exception {
+		mockMvc.perform(get("/v3/api-docs"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.components.schemas.MenuResponse.properties.children.type").value("array"))
+				.andExpect(jsonPath("$.components.schemas.MenuResponse.properties.children.items['$ref']")
+						.value("#/components/schemas/MenuResponse"));
+	}
+
+	@Test
 	void swaggerUiRedirectsToItsIndexPage() throws Exception {
 		mockMvc.perform(get("/swagger-ui.html"))
 				.andExpect(status().isFound())
