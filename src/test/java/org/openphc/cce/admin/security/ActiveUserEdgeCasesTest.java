@@ -23,6 +23,8 @@ import org.openphc.cce.admin.entity.User;
 import org.openphc.cce.admin.entity.UserStatus;
 import org.openphc.cce.admin.health.DatabaseCheck;
 import org.openphc.cce.admin.repository.AuditLogRepository;
+import org.openphc.cce.admin.repository.MenuRepository;
+import org.openphc.cce.admin.repository.RoleMenuRepository;
 import org.openphc.cce.admin.repository.UserRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -77,6 +79,12 @@ class ActiveUserEdgeCasesTest {
 	// tests write no audit rows
 	@MockitoBean
 	private AuditLogRepository auditLogRepository;
+
+	@MockitoBean
+	private MenuRepository menuRepository;
+
+	@MockitoBean
+	private RoleMenuRepository roleMenuRepository;
 
 	@MockitoBean
 	private PlatformTransactionManager transactionManager;

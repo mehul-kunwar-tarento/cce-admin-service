@@ -145,7 +145,7 @@ delete method (S4).
 | `actor_id` | UUID | Yes | — | `users.id` of the caller; null for `SYSTEM` |
 | `actor_username` | VARCHAR(255) | No | — | Caller's username, or `SYSTEM` at startup (D5) |
 | `action` | VARCHAR(50) | No | — | §9.2 |
-| `entity_type` | VARCHAR(50) | No | — | `USER` (S2a); other values confirmed in S5 / S6 |
+| `entity_type` | VARCHAR(50) | No | — | `USER` (S2a), `MENU` (S5); `ROLE` confirmed in S6 |
 | `entity_id` | VARCHAR(64) | No | — | Id of the changed row (string, so it can hold any id) |
 | `before` | JSONB | Yes | — | State before; null on create |
 | `after` | JSONB | Yes | — | State after; null on delete. Failure details for `*_FAILED` (§9.3) |
@@ -343,14 +343,16 @@ A `permissionName` in a row is ignored; rows are stored under the role's own nam
 
 | Field | Type | Required | Rule |
 |-------|------|----------|------|
-| `key` | String | Yes | §3 pattern; unique; on `PUT` must equal the current key |
-| `label` | String | Yes | |
-| `path` | String | Yes | |
+| `key` | String | Yes | §3 pattern, max 100; unique; on `PUT` must equal the current key |
+| `label` | String | Yes | Not blank, max 255 |
+| `path` | String | Yes | Not blank, max 512 |
 | `type` | String | Yes | §3 |
-| `parentId` | UUID | DETAIL only | NAV: none. DETAIL: an existing NAV, not itself |
-| `icon` | String | No | |
-| `sortOrder` | int | (confirmed in S5) | |
-| `isActive` | boolean | (confirmed in S5) | |
+| `parentId` | UUID | DETAIL only | NAV: none. DETAIL: an existing NAV, not itself. Left out on `PUT` = none |
+| `icon` | String | No | Max 100; blank = no icon. Left out on `PUT` = none |
+| `sortOrder` | Integer | Yes | Ties are ordered by `key` |
+| `isActive` | Boolean | `POST`: no (missing = `true`). `PUT`: yes | |
+
+`PUT` sends the complete menu; the same values as now write nothing and no audit row.
 
 ### 4.8 Query parameters
 
@@ -408,7 +410,7 @@ do **not** use these token roles; they read `user_roles` (S12).
 | `UserResponse` | `id`, `username`, `email`, `firstName`, `lastName`, `status`, `roles` (`[{id, name, displayName}]`), `facilityScope`, `lastLoginAt`, `createdAt` | S9 rule d |
 | Create-user 201 body | `id`, `username`, `email`, `status`, `roles` | S8 |
 | `RoleResponse` | (confirmed in S6) | S6 |
-| `MenuResponse` | Tree node with `children`; menu fields incl. `isActive` (exact list confirmed in S5) | S5 |
+| `MenuResponse` | `id`, `key`, `label`, `path`, `icon`, `type`, `parentId`, `sortOrder`, `isActive`, `children` (List\<MenuResponse\>; `[]` for a DETAIL and in the `POST`/`PUT` reply) | S5 |
 | `RoleMenusResponse` | `menus` (`[{id, key, label, type, parentId}]`), `warnings` (List\<String\>) | S7 |
 | `PermissionRow` | `id` (Long), `httpMethod`, `uriPattern`, `description`, `resourceCategory` | S11 |
 | `MeResponse` | `id`, `username`, `email`, `firstName`, `lastName`, `roles` (sorted names), `facilityScope` | S12 rule a |
@@ -572,9 +574,9 @@ Realm roles themselves are created and deleted by the gateway's sync, never by t
 | Action | Written by | `before` | `after` |
 |--------|------------|----------|---------|
 | `BOOTSTRAP_ADMIN_LINKED` | Startup (S2a) | null | `keycloakId`, `username`, `email`, `firstName`, `lastName`, `status` (`ACTIVE`), `roles` (`["SUPER_ADMIN"]`) |
-| `MENU_CREATED` | `POST /menus` (S5) | null | the menu |
-| `MENU_UPDATED` | `PUT /menus/{id}` (S5) | the menu | the menu |
-| `MENU_DELETED` | `DELETE /menus/{id}` (S5) | the menu + ids of roles that had it | null |
+| `MENU_CREATED` | `POST /menus` (S5) | null | the menu: `id`, `key`, `label`, `path`, `icon`, `type`, `parentId`, `sortOrder`, `isActive` |
+| `MENU_UPDATED` | `PUT /menus/{id}` (S5); not written when nothing changed | the menu (as above) | the menu (as above) |
+| `MENU_DELETED` | `DELETE /menus/{id}` (S5) | `{menu: <as above>, roleIds: [ids of the roles that had it, sorted]}` | null |
 | `ROLE_CREATED` | `POST /roles` (S6) | null | confirmed in S6 |
 | `ROLE_UPDATED` | `PUT /roles/{id}` (S6) | the role | the role |
 | `ROLE_DELETED` | `DELETE /roles/{id}` (S6) | the role + its menus + its permissions | null |

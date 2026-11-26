@@ -50,7 +50,7 @@ evidence behind each one.
 | D11 | Resolved | `permission_name` = the role's name (a job role). Rows with other names, such as `COLLECTOR_EVENTS_WRITE`, are never read or changed; a new role can't take a name already used there (409) |
 | D12 | Resolved | Every error is `{error:{code,message}}`. Four codes added to the PRD's list (`NOT_FOUND`, `METHOD_NOT_ALLOWED`, `UNSUPPORTED_MEDIA_TYPE`, `INTERNAL_ERROR`). A 500 carries a reference id that is also on the ERROR log line; internal details never reach the caller |
 | D13 | **Open** (Q4) | Keycloak realm roles (PRD) or client roles (the deployed gateway)? Working default: realm roles. Must be answered before the dev deploy (iteration 2) |
-| D14 | **Open** (Q3) | The team's data dictionary isn't available, so the tables and the 12 menus are our own working default (menus taken from `cce-insights-ui`); they will be compared when it arrives |
+| D14 | Resolved | Compared with Jay's data dictionary (PR #1) on 2026-11-19: our tables and the 12 menus (taken from `cce-insights-ui`) are kept; one index, `role_menus(menu_id)`, taken from his |
 
 ### Sub-tasks
 

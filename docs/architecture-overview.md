@@ -180,7 +180,8 @@ org/openphc/cce/admin/
 │   ├── ApiException.java                          #   (status, code, message) thrown on purpose (S1)
 │   ├── ErrorResponse.java                         #   {error:{code,message}} (S1)
 │   ├── ErrorResponseWriter.java                   #   Writes that body from code that runs before any controller (S3)
-│   └── GlobalExceptionHandler.java                #   @RestControllerAdvice: D12 mapping, reference id on 500 (S1)
+│   └── GlobalExceptionHandler.java                #   @RestControllerAdvice: D12 mapping, reference id on 500 (S1);
+│                                                  #   wrong-type URL or query value → 400 (S5)
 │
 ├── health/
 │   ├── HealthController.java                      #   GET /admin/v1/health → {status, db}, not enveloped (S1)
@@ -205,13 +206,15 @@ org/openphc/cce/admin/
 ├── entity/                                        # JPA entities for the 7 tables
 │   ├── User.java, UserStatus.java                 #   (S3)
 │   ├── AuditLog.java                              #   @Immutable: Hibernate never updates a saved row (S4)
-│   ├── Menu.java, RoleMenu.java                   #   (S5)
+│   ├── Menu.java, MenuType.java                   #   parentId is a plain UUID, no JPA relation (S5)
+│   ├── RoleMenu.java, RoleMenuId.java             #   Two-column key (role_id, menu_id) via @IdClass (S5)
 │   └── Role.java, ApiPermission.java, UserRole.java   # ApiPermission.id is Long (S6, D1)
 │
 ├── repository/                                    # Spring Data JPA
 │   ├── UserRepository.java                        #   findByKeycloakId, moveLastLoginForward (S3); existsByUsername, addRole (S2a)
 │   ├── AuditLogRepository.java                    #   bare Repository: save, findById, findAll, count; no update/delete (S4)
-│   ├── MenuRepository.java, RoleMenuRepository.java   # (S5)
+│   ├── MenuRepository.java                        #   findAllByOrderBySortOrderAscKeyAsc, existsByKey, existsByParentId (S5)
+│   ├── RoleMenuRepository.java                    #   findByMenuIdOrderByRoleId (S5)
 │   └── …Role / ApiPermission / UserRole repositories  # (names confirmed in S6)
 │
 ├── client/                                        # Everything that leaves the service
@@ -252,8 +255,9 @@ org/openphc/cce/admin/
 │   ├── RolePermissionService.java                 #   (S11)
 │   └── MeService.java                             #   (S12)
 │
-└── <dto package>/                                 # Request / response DTOs (package confirmed in S5)
+└── dto/                                           # Request / response DTOs, and what audit rows store
     ├── MenuRequest, MenuResponse                  #   (S5)
+    ├── MenuSnapshot, DeletedMenu                  #   Audit before/after of a menu (S5)
     ├── CreateRoleRequest, UpdateRoleRequest, RoleResponse   # (S6)
     ├── RoleMenusRequest, RoleMenusResponse        #   (S7)
     ├── CreateUserRequest                          #   (S8)

@@ -1,0 +1,17 @@
+package org.openphc.cce.admin.repository;
+
+import java.util.List;
+import java.util.UUID;
+
+import org.openphc.cce.admin.entity.Menu;
+import org.springframework.data.jpa.repository.JpaRepository;
+
+public interface MenuRepository extends JpaRepository<Menu, UUID> {
+
+	/** Every menu, in sidebar order; two menus with the same sortOrder are ordered by key. */
+	List<Menu> findAllByOrderBySortOrderAscKeyAsc();
+
+	boolean existsByKey(String key);
+
+	boolean existsByParentId(UUID parentId);
+}

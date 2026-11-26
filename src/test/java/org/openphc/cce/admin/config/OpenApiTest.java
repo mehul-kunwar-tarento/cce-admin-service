@@ -8,6 +8,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import org.junit.jupiter.api.Test;
 import org.openphc.cce.admin.health.DatabaseCheck;
 import org.openphc.cce.admin.repository.AuditLogRepository;
+import org.openphc.cce.admin.repository.MenuRepository;
+import org.openphc.cce.admin.repository.RoleMenuRepository;
 import org.openphc.cce.admin.repository.UserRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -45,6 +47,12 @@ class OpenApiTest {
 	private AuditLogRepository auditLogRepository;
 
 	@MockitoBean
+	private MenuRepository menuRepository;
+
+	@MockitoBean
+	private RoleMenuRepository roleMenuRepository;
+
+	@MockitoBean
 	private PlatformTransactionManager transactionManager;
 
 	@Test
@@ -71,6 +79,15 @@ class OpenApiTest {
 		mockMvc.perform(get("/v3/api-docs"))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.paths['/admin/v1/health'].get.security").isEmpty());
+	}
+
+	@Test
+	void menuChildrenAreDocumentedAsMenus() throws Exception {
+		mockMvc.perform(get("/v3/api-docs"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.components.schemas.MenuResponse.properties.children.type").value("array"))
+				.andExpect(jsonPath("$.components.schemas.MenuResponse.properties.children.items['$ref']")
+						.value("#/components/schemas/MenuResponse"));
 	}
 
 	@Test

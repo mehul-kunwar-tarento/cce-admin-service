@@ -665,9 +665,13 @@ PRD API table).
 
 #### GET /menus
 
-The whole catalog as a tree: DETAIL items in their NAV parent's `children`, sorted by `sortOrder`,
+The whole catalog as a tree: DETAIL items in their NAV parent's `children`, sorted by `sortOrder`
+and then by `key` (so two menus with the same `sortOrder` always come out in the same order),
 **inactive menus included** (with `isActive`), not paginated. (`/me/menus` is the one that hides
-inactive menus.) Node fields confirmed in S5.
+inactive menus.)
+
+Each node: `id`, `key`, `label`, `path`, `icon` (null if none), `type`, `parentId` (null for a NAV),
+`sortOrder`, `isActive`, `children` (a NAV's DETAIL menus; `[]` for a DETAIL).
 
 #### POST /menus
 
@@ -675,29 +679,38 @@ inactive menus.) Node fields confirmed in S5.
 
 | Field | Type | Required | Rule |
 |-------|------|----------|------|
-| `key` | string | Yes | `^[a-z][a-z0-9-]*$` (e.g. `patient-detail`); unique; can never change |
-| `label` | string | Yes | |
-| `path` | string | Yes | |
+| `key` | string | Yes | `^[a-z][a-z0-9-]*$` (e.g. `patient-detail`), max 100; unique; can never change |
+| `label` | string | Yes | Not blank, max 255 |
+| `path` | string | Yes | Not blank, max 512 |
 | `type` | string | Yes | `NAV` or `DETAIL` |
 | `parentId` | UUID | DETAIL only | NAV has no parent; DETAIL must have a NAV parent (no DETAIL under DETAIL) |
-| `icon` | string | No | |
-| `sortOrder` | int | — | Confirmed in S5 |
-| `isActive` | boolean | — | Confirmed in S5 |
+| `icon` | string | No | Max 100; blank is stored as no icon |
+| `sortOrder` | int | Yes | Position in the sidebar, smaller first; the same number twice is allowed (ordered by `key`) |
+| `isActive` | boolean | No | Missing = `true` |
 
 | Status | Code | When |
 |--------|------|------|
-| 201 | — | Created; audit `MENU_CREATED` |
-| 400 | `VALIDATION_ERROR` | Missing label, path or type; bad key format; DETAIL without parent; NAV with parent; unknown `parentId`; parent is a DETAIL |
+| 201 | — | Created; body = the menu (`children: []`); audit `MENU_CREATED` |
+| 400 | `VALIDATION_ERROR` | Missing, blank or too long text; missing `type` or `sortOrder`; bad key format; DETAIL without parent; NAV with parent; unknown `parentId`; parent is a DETAIL |
 | 409 | `DUPLICATE_MENU_KEY` | Key exists (also when two requests race: one 201, one 409, never 500) |
 
 #### PUT /menus/{id}
 
 Change label, path, icon, sortOrder, isActive (and parent / type within the rules above).
 
+The body is the **complete** new version of the menu, with the same fields and rules as `POST`, except:
+`isActive` is required, and a left-out `icon` or `parentId` means none (there is no "keep the old
+value"). Sending the same values as now → `200`, nothing written, no audit row, `updated_at` unchanged.
+The response is the edited menu itself, so `children` is always `[]`; read the tree with `GET /menus`.
+
+Check order (first failure stops; nothing is written until all pass): shape checks → menu exists →
+key unchanged → `isActive` present → `parentId` is not its own id → parent rules as on `POST` → a menu
+with DETAIL menus under it does not become a DETAIL.
+
 | Status | Code | When |
 |--------|------|------|
-| 200 | — | Updated; audit `MENU_UPDATED` with before/after |
-| 400 | `VALIDATION_ERROR` | Different `key` (same key is fine); a NAV with children turned into DETAIL; `parentId` = its own id |
+| 200 | — | Updated; audit `MENU_UPDATED` with before/after. Same values as now: no audit |
+| 400 | `VALIDATION_ERROR` | Different `key` (same key is fine); missing `isActive`; `parentId` = its own id; the `POST` parent rules; a NAV with children turned into DETAIL; any `POST` shape check |
 | 404 | `MENU_NOT_FOUND` | Unknown id |
 
 #### DELETE /menus/{id}
@@ -706,7 +719,7 @@ Deletes the menu and its `role_menus` rows (B-44).
 
 | Status | Code | When |
 |--------|------|------|
-| 204 | — | Deleted; audit `MENU_DELETED`, `before` lists the role ids that had it |
+| 204 | — | Deleted; audit `MENU_DELETED`, `before` = `{menu: {…}, roleIds: […]}` (the ids of the roles that had it, sorted) |
 | 400 | `VALIDATION_ERROR` | A NAV that still has DETAIL children ("delete or move its DETAIL menus first"); nothing deleted |
 | 404 | `MENU_NOT_FOUND` | Unknown id |
 
@@ -870,7 +883,7 @@ exception text, SQL, stack trace, host or class name is ever put in `message`.
 | 403, genuine token but no `users` row | `Your account is not set up in the admin service. Ask an administrator to add you.` |
 | 403, user INACTIVE or LOCKED | `Your account is not active. Ask an administrator to activate it.` |
 | Bean validation (body or query) | `Invalid request: <field> <rule>.`, every failing field, A–Z, joined by `; ` — e.g. `Invalid request: name must not be blank.`, `Invalid request: pageSize must be less than or equal to 100.` |
-| Value of the wrong type in a query parameter (`?page=abc`) | `Invalid request: page has an invalid value.` |
+| Value of the wrong type in the URL path or a query parameter (`/menus/abc`, `?page=abc`) | `Invalid request: id has an invalid value.`, `Invalid request: page has an invalid value.` |
 | Broken JSON, missing body, wrong field type in the body | `Request body is not valid JSON, or a field has the wrong type.` |
 | 404 `NOT_FOUND`, unknown URL | `No endpoint GET /admin/v1/rolez.` (method and path of the request) |
 | 405 `METHOD_NOT_ALLOWED` | `Method DELETE is not allowed for this URL.` |
@@ -881,8 +894,19 @@ exception text, SQL, stack trace, host or class name is ever put in `message`.
 | Name used by a gateway permission set (D11, 409) | `This name is already used by an existing permission set in the gateway. Choose another name.` |
 | Keycloak already has the account (S8 rule c, 409 `EMAIL_IN_USE`) | `Keycloak already has an account with this username or email that this service doesn't know. An operator must remove or link it.` |
 | Reset password for a non-ACTIVE user (S10 rule g) | `Activate the user first.` |
+| Unknown menu id (404 `MENU_NOT_FOUND`) | `No menu with id <id>.` |
+| Menu key taken (409 `DUPLICATE_MENU_KEY`) | `A menu with key '<key>' already exists.` |
+| Menu key changed in `PUT` | `Menu key cannot be changed (consoles find their screens by it). To use a different key, create a new menu. Nothing was changed.` |
+| Menu `isActive` missing in `PUT` | `Invalid request: isActive must not be null.` |
+| Menu as its own parent | `A menu cannot be its own parent.` |
+| NAV with a parent | `A NAV menu has no parent; leave parentId empty.` |
+| DETAIL without a parent | `A DETAIL menu needs a NAV parent in parentId.` |
+| Unknown parent | `parentId <id> is not a menu.` |
+| Parent is a DETAIL | `The parent of a DETAIL menu must be a NAV menu; '<key>' is a DETAIL.` |
+| `PUT` turning a menu with DETAIL menus into a DETAIL | `'<key>' has DETAIL menus under it, so it can't become a DETAIL. Move or delete them first. Nothing was changed.` |
+| `DELETE` of a NAV with DETAIL menus | `'<key>' still has DETAIL menus under it. Delete or move its DETAIL menus first. Nothing was deleted.` |
 
-Messages of other expected errors (404s, duplicate key, unknown menu ids) are confirmed in the
+Messages of other expected errors (other 404s and duplicates, unknown menu ids in S7) are confirmed in the
 sub-task that raises them. Expected errors never carry a reference id (D12 point 6).
 
 ### 5.4 502 `KEYCLOAK_SYNC_FAILED` messages
