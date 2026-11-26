@@ -7,6 +7,7 @@ import java.util.UUID;
 
 import jakarta.servlet.http.HttpServletRequest;
 
+import org.openphc.cce.admin.client.GatewaySyncException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -35,6 +36,12 @@ public class GlobalExceptionHandler {
 	@ExceptionHandler(ApiException.class)
 	public ResponseEntity<ErrorResponse> handleApiException(ApiException e) {
 		return build(e.getStatus(), e.getCode(), e.getMessage());
+	}
+
+	/** A gateway sync that a caller did not turn into its own 502 message; the reason alone still says what failed. */
+	@ExceptionHandler(GatewaySyncException.class)
+	public ResponseEntity<ErrorResponse> handleGatewaySync(GatewaySyncException e) {
+		return build(HttpStatus.BAD_GATEWAY, ErrorCode.KEYCLOAK_SYNC_FAILED, e.getMessage());
 	}
 
 	@ExceptionHandler(NoResourceFoundException.class)

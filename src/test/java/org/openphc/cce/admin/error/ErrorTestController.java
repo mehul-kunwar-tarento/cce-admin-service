@@ -3,6 +3,7 @@ package org.openphc.cce.admin.error;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 
+import org.openphc.cce.admin.client.GatewaySyncException;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -24,6 +25,11 @@ class ErrorTestController {
 	@GetMapping("/test/api-exception")
 	String apiException() {
 		throw new ApiException(HttpStatus.NOT_FOUND, ErrorCode.ROLE_NOT_FOUND, "x");
+	}
+
+	@GetMapping("/test/gateway-sync")
+	String gatewaySync() {
+		throw new GatewaySyncException("Gateway not reachable at http://test-gateway.");
 	}
 
 	@GetMapping("/test/boom")

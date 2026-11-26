@@ -100,6 +100,14 @@ class GlobalExceptionHandlerTest {
 	}
 
 	@Test
+	void gatewaySyncFailureNobodyCaughtIs502WithTheReason() throws Exception {
+		mockMvc.perform(get("/test/gateway-sync"))
+				.andExpect(status().isBadGateway())
+				.andExpect(error("KEYCLOAK_SYNC_FAILED", "Gateway not reachable at http://test-gateway."))
+				.andExpect(noSpringDefaultKeys());
+	}
+
+	@Test
 	void unexpectedErrorIs500WithReferenceAndHidesTheDetail(CapturedOutput output) throws Exception {
 		MvcResult result = mockMvc.perform(get("/test/boom"))
 				.andExpect(status().isInternalServerError())
