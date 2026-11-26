@@ -328,7 +328,7 @@ curl -s http://localhost:8085/admin/v1/me -H "Authorization: Bearer $TOKEN" | jq
 | Service-layer tests | `KeycloakClient` and `GatewaySyncClient` mocked, so "Keycloak worked, DB failed" can be tested without a real Keycloak (PRD §9 "Testability") | S2a onwards |
 | Migration tests | `MigrationTest` runs Flyway on a Testcontainers Postgres; `MigrationOverGatewayTableTest` loads the gateway's seed first, then migrates twice — **Docker must be running** | S2 |
 | Gateway client test | WireMock plays the gateway: 200 / 206 / 500 / refused / timeout | S6a |
-| Audit assertion | `AuditAssert.exactlyOneRow(action, entityId)`: every mutating endpoint has a test that asserts exactly one `audit_log` row (B-50) | S4 onwards |
+| Audit assertion | `AuditAssert.exactlyOneRow(jdbc, action, entityId)`: every mutating endpoint has a test that asserts exactly one `audit_log` row (B-50) | S4 onwards |
 | Error-handler / security tests | Test-only controllers under `src/test` | S1, S3 |
 | End-to-end scenarios | `local/scenarios/s1.sh` … `s6.sh`: curl through the local gateway, PASS / FAIL per check | S13 |
 

@@ -149,7 +149,7 @@ delete method (S4).
 | `entity_id` | VARCHAR(64) | No | — | Id of the changed row (string, so it can hold any id) |
 | `before` | JSONB | Yes | — | State before; null on create |
 | `after` | JSONB | Yes | — | State after; null on delete. Failure details for `*_FAILED` (§9.3) |
-| `ip_address` | VARCHAR(45) | Yes | — | First `X-Forwarded-For` entry, else the remote address; null outside a request |
+| `ip_address` | VARCHAR(45) | Yes | — | First `X-Forwarded-For` entry, trimmed; no header, or an entry that is blank or longer than 45 characters → the remote address; null outside a request |
 | `created_at` | TIMESTAMPTZ | No | `now()` | |
 
 **Constraints & indexes:** no FKs (so failure rows and `SYSTEM` rows never break on a missing
@@ -558,7 +558,7 @@ Realm roles themselves are created and deleted by the gateway's sync, never by t
 | Field | Rule |
 |-------|------|
 | Actor | `CurrentUser`; no request (startup) → `actor_username = SYSTEM`, `actor_id = null` |
-| IP | First `X-Forwarded-For` entry, else remote address; null outside a request |
+| IP | First `X-Forwarded-For` entry, trimmed; no header, or an entry that is blank or longer than 45 characters → remote address (a faked header never fails the change); null outside a request |
 | `before` / `after` | JSON; never contain passwords or secrets |
 | Count | Exactly one row per change, in the change's transaction (`AuditWriter.record`, MANDATORY) |
 
@@ -588,7 +588,9 @@ Requests that change nothing (same set, same status, `POST /roles/{id}/sync`) wr
 ### 9.3 Failure actions (D8)
 
 Written by `AuditWriter.recordFailure` in **its own transaction** (`REQUIRES_NEW`), so they
-survive the main rollback. If this write fails too, the ERROR log line is the record.
+survive the main rollback. `recordFailure` logs the ERROR line (§10) before it writes the row, and
+never throws; if the row can't be written (insert or commit), a second ERROR line says so and the
+first one is the record. `before` is null.
 
 | Action | Written by |
 |--------|------------|
@@ -616,7 +618,7 @@ Fields the log lines carry:
 |----------|--------|
 | ERROR on a 500 (D12) | `ref` = 8-character reference id (also in the response `message`), method + path, full exception |
 | WARN on a gateway sync failure (D3) | role id, URL called, gateway status, full gateway response body |
-| ERROR on a half-done Keycloak/DB change (D8) | action, target user (id / username), `keycloakId`, failed step, error, cleanup result |
+| ERROR on a half-done Keycloak/DB change (D8) | Written by `AuditWriter.recordFailure`: `<action> <entityType> <entityId>: keycloakId=…, failedStep=…, error=…, cleanup=…`; if the audit row can't be written, a second line `Audit row for <action> <entityType> <entityId> not written; the line above is the only record` with the exception |
 
 Metrics and MDC fields are **not in v1**. The log format is Spring Boot's default console format,
 unchanged:

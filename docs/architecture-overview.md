@@ -203,13 +203,13 @@ org/openphc/cce/admin/
 │
 ├── entity/                                        # JPA entities for the 7 tables
 │   ├── User.java, UserStatus.java                 #   (S3)
-│   ├── AuditLog.java                              #   (S4)
+│   ├── AuditLog.java                              #   @Immutable: Hibernate never updates a saved row (S4)
 │   ├── Menu.java, RoleMenu.java                   #   (S5)
 │   └── Role.java, ApiPermission.java, UserRole.java   # ApiPermission.id is Long (S6, D1)
 │
 ├── repository/                                    # Spring Data JPA
 │   ├── UserRepository.java                        #   findByKeycloakId, moveLastLoginForward (S3)
-│   ├── AuditLogRepository.java                    #   insert + read only, no update/delete (S4)
+│   ├── AuditLogRepository.java                    #   bare Repository: save, findById, findAll, count; no update/delete (S4)
 │   ├── MenuRepository.java, RoleMenuRepository.java   # (S5)
 │   └── …Role / ApiPermission / UserRole repositories  # (names confirmed in S6)
 │
@@ -228,7 +228,9 @@ org/openphc/cce/admin/
 │
 ├── audit/
 │   ├── AuditAction.java                           #   Enum of action names (S4; each later sub-task adds its own)
-│   └── AuditWriter.java                           #   record() MANDATORY tx; recordFailure() REQUIRES_NEW, never throws (S4)
+│   └── AuditWriter.java                           #   record(): joins the caller's transaction (MANDATORY);
+│                                                  #   recordFailure(): ERROR log, then its own transaction
+│                                                  #   (TransactionTemplate, REQUIRES_NEW) inside a try, never throws (S4)
 │
 ├── controller/                                    # HTTP only: parse, call service, wrap in envelope
 │   ├── MenuController.java                        #   /menus (S5)
@@ -281,7 +283,10 @@ src/test/
     ├── config/OpenApiTest.java                    # Whole app without a database: /v3/api-docs, Swagger UI (S1)
     ├── db/MigrationTest.java                      # Flyway on Testcontainers Postgres: tables, keys, constraints, seed (S2)
     ├── db/MigrationOverGatewayTableTest.java      # Gateway seed loaded first, then our migrations; second run adds nothing (S2)
-    ├── AuditAssert.java                           # exactlyOneRow(action, entityId) helper (S4)
+    ├── audit/AuditAssert.java                     # exactlyOneRow(jdbc, action, entityId) helper (S4)
+    ├── audit/AuditLogRepositoryTest.java          # Rows read back with JSON; no update/delete method; saved row can't change (S4)
+    ├── audit/AuditWriterTest.java                 # Real Postgres: row content, no transaction, rollback, actor, IP rules, failure rows (S4)
+    ├── audit/AuditWriterFailureTest.java          # Insert or commit fails → recordFailure never throws, ERROR log has the details (S4)
     ├── security/TestTokens.java                   # Own key pair + JWKS server; signs good and bad test tokens (S3)
     ├── security/SecurityTestController.java       # Test-only /test/secure, /test/current-user (S3)
     ├── security/TokenCheckTest.java               # 401 cases, open paths (S3)
@@ -401,7 +406,7 @@ Nothing is retried automatically (B-32). Exact messages: [API Reference — §4]
 | **Which role may call which method + URI** | The gateway only, from `api_permissions`. No per-URL role check in this service |
 | **Caller is a local ACTIVE user** | This service only (B-12). Blocks a deactivated user whose token hasn't expired yet |
 | **Open paths** | `/admin/v1/health`, `/swagger-ui/**`, `/v3/api-docs/**` (they show the API shape only; calls still need a token) |
-| **Audit identity** | Actor from the verified token's `sub` → `users`; IP from the first `X-Forwarded-For` entry, else the remote address (S4) |
+| **Audit identity** | Actor from the verified token's `sub` → `users`; IP from the first `X-Forwarded-For` entry; no header, or an entry that is blank or longer than 45 characters → the remote address, so a faked header never fails the change (S4) |
 | **Passwords** | Never pass through the service: create sets Keycloak's `UPDATE_PASSWORD` required action; reset sends Keycloak's email (B-36) |
 | **Secrets** | Environment variables only; nothing in the repo (B-13) |
 | **Config parity** | `JWT_ISSUER`, `JWT_AUDIENCE`, `JWT_ROLES_CLAIM_PATH` match the gateway's values for the same realm (PRD §9) |
