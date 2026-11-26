@@ -43,6 +43,19 @@ public class Menu {
 	protected Menu() {
 	}
 
+	/** A new menu, not saved yet. */
+	public Menu(String key, String label, String path, String icon, MenuType type, UUID parentId, int sortOrder,
+			boolean isActive) {
+		this.key = key;
+		this.label = label;
+		this.path = path;
+		this.icon = icon;
+		this.type = type;
+		this.parentId = parentId;
+		this.sortOrder = sortOrder;
+		this.isActive = isActive;
+	}
+
 	public UUID getId() {
 		return id;
 	}
