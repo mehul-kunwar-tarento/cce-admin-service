@@ -56,6 +56,23 @@ class OpenApiTest {
 	}
 
 	@Test
+	void apiDocsDeclareABearerToken() throws Exception {
+		mockMvc.perform(get("/v3/api-docs"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.components.securitySchemes.bearerAuth.type").value("http"))
+				.andExpect(jsonPath("$.components.securitySchemes.bearerAuth.scheme").value("bearer"))
+				.andExpect(jsonPath("$.components.securitySchemes.bearerAuth.bearerFormat").value("JWT"))
+				.andExpect(jsonPath("$.security[0].bearerAuth").isArray());
+	}
+
+	@Test
+	void healthNeedsNoTokenInTheDocs() throws Exception {
+		mockMvc.perform(get("/v3/api-docs"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.paths['/admin/v1/health'].get.security").isEmpty());
+	}
+
+	@Test
 	void swaggerUiRedirectsToItsIndexPage() throws Exception {
 		mockMvc.perform(get("/swagger-ui.html"))
 				.andExpect(status().isFound())

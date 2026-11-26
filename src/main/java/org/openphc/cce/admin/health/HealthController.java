@@ -1,5 +1,7 @@
 package org.openphc.cce.admin.health;
 
+import io.swagger.v3.oas.annotations.security.SecurityRequirements;
+
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -14,6 +16,8 @@ public class HealthController {
 	}
 
 	@GetMapping("/admin/v1/health")
+	// Open without a token, so the API docs show no lock here
+	@SecurityRequirements
 	public HealthResponse health() {
 		String db = "DOWN";
 		if (databaseCheck.isUp()) {
