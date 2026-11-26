@@ -18,9 +18,11 @@ import org.openphc.cce.admin.dto.RoleSnapshot;
 import org.openphc.cce.admin.entity.ApiPermission;
 import org.openphc.cce.admin.entity.Role;
 import org.openphc.cce.admin.error.ApiException;
+import org.openphc.cce.admin.error.ConstraintViolations;
 import org.openphc.cce.admin.error.ErrorCode;
 import org.openphc.cce.admin.repository.ApiPermissionRepository;
 import org.openphc.cce.admin.repository.RoleRepository;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -40,6 +42,8 @@ public class RoleService {
 	// The row every role needs so its users can load their sidebar; it also makes the gateway create the role
 	private static final String SIDEBAR_METHOD = "GET";
 	private static final String SIDEBAR_PATH = "/admin/v1/me/menus";
+	// The unique constraint on roles.name; the guard against two creates racing past the check in insertRole
+	private static final String NAME_CONSTRAINT = "uk_roles_name";
 
 	private final RoleRepository roleRepository;
 	private final ApiPermissionRepository apiPermissionRepository;
@@ -101,7 +105,15 @@ public class RoleService {
 		}
 
 		Role role = new Role(name, request.displayName(), emptyToNull(request.description()));
-		roleRepository.saveAndFlush(role);
+		try {
+			roleRepository.saveAndFlush(role);
+		} catch (DataIntegrityViolationException e) {
+			// Another request created the same name between the check above and this insert
+			if (ConstraintViolations.isViolationOf(e, NAME_CONSTRAINT)) {
+				throw duplicateName("A role named '" + name + "' already exists.");
+			}
+			throw e;
+		}
 		// Read the row back, so createdAt and updatedAt (set by the database) are in the reply
 		entityManager.refresh(role);
 
