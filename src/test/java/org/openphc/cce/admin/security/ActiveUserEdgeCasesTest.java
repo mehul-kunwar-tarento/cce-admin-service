@@ -22,10 +22,13 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.openphc.cce.admin.entity.User;
 import org.openphc.cce.admin.entity.UserStatus;
 import org.openphc.cce.admin.health.DatabaseCheck;
+import org.openphc.cce.admin.repository.ApiPermissionRepository;
 import org.openphc.cce.admin.repository.AuditLogRepository;
 import org.openphc.cce.admin.repository.MenuRepository;
 import org.openphc.cce.admin.repository.RoleMenuRepository;
+import org.openphc.cce.admin.repository.RoleRepository;
 import org.openphc.cce.admin.repository.UserRepository;
+import org.openphc.cce.admin.repository.UserRoleRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -85,6 +88,15 @@ class ActiveUserEdgeCasesTest {
 
 	@MockitoBean
 	private RoleMenuRepository roleMenuRepository;
+
+	@MockitoBean
+	private RoleRepository roleRepository;
+
+	@MockitoBean
+	private ApiPermissionRepository apiPermissionRepository;
+
+	@MockitoBean
+	private UserRoleRepository userRoleRepository;
 
 	@MockitoBean
 	private PlatformTransactionManager transactionManager;
