@@ -44,6 +44,7 @@ class TokenCheckTest {
 		registry.add("JWT_AUDIENCE", () -> TestTokens.AUDIENCE);
 		registry.add("KEYCLOAK_BASE_URL", () -> "http://test-keycloak");
 		registry.add("KEYCLOAK_CLIENT_SECRET", () -> "test-secret");
+		registry.add("GATEWAY_BASE_URL", () -> "http://test-gateway");
 		registry.add("JWT_JWK_SET_URI", tokens::jwkSetUri);
 	}
 

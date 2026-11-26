@@ -46,6 +46,7 @@ public class RequiredSettingsCheck implements ApplicationListener<ApplicationEnv
 		required.put("spring.security.oauth2.resourceserver.jwt.audiences", "JWT_AUDIENCE");
 		required.put("cce.keycloak.base-url", "KEYCLOAK_BASE_URL");
 		required.put("cce.keycloak.client-secret", "KEYCLOAK_CLIENT_SECRET");
+		required.put("cce.gateway.base-url", "GATEWAY_BASE_URL");
 		return required;
 	}
 

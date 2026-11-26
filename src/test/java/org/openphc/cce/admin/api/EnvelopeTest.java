@@ -14,10 +14,11 @@ import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.test.json.JsonCompareMode;
 import org.springframework.test.web.servlet.MockMvc;
 
-// The JWT and Keycloak settings must have values for the app to start, even with security filters off
+// The JWT, Keycloak and gateway settings must have values for the app to start, even with security filters off
 @WebMvcTest(controllers = EnvelopeTestController.class,
 		properties = { "JWT_ISSUER=http://test-keycloak/realms/cce", "JWT_AUDIENCE=cce-admin-service",
-				"KEYCLOAK_BASE_URL=http://test-keycloak", "KEYCLOAK_CLIENT_SECRET=test-secret" })
+				"KEYCLOAK_BASE_URL=http://test-keycloak", "KEYCLOAK_CLIENT_SECRET=test-secret",
+				"GATEWAY_BASE_URL=http://test-gateway" })
 // Security filters off: this test checks only the response envelope and paging; security is tested in TokenCheckTest
 @AutoConfigureMockMvc(addFilters = false)
 class EnvelopeTest {

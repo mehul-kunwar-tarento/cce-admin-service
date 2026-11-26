@@ -28,9 +28,10 @@ import jakarta.persistence.EntityManager;
  * The audit table from Java: rows go in and read back, and nothing can change or delete them.
  * Each test runs in a transaction that is rolled back, so tests never see each other's rows.
  */
-// The whole app starts (security included), so the JWT and Keycloak settings need values
+// The whole app starts (security included), so the JWT, Keycloak and gateway settings need values
 @SpringBootTest(properties = { "JWT_ISSUER=http://test-keycloak/realms/cce", "JWT_AUDIENCE=cce-admin-service",
-		"KEYCLOAK_BASE_URL=http://test-keycloak", "KEYCLOAK_CLIENT_SECRET=test-secret" })
+		"KEYCLOAK_BASE_URL=http://test-keycloak", "KEYCLOAK_CLIENT_SECRET=test-secret",
+		"GATEWAY_BASE_URL=http://test-gateway" })
 @Testcontainers
 @Transactional
 class AuditLogRepositoryTest {
