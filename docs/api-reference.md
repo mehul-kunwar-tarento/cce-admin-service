@@ -410,15 +410,15 @@ No password ever passes through the service (B-36).
 
 #### GET /roles
 
-Paginated list (§2.2). Only roles in our `roles` table are listed; `api_permissions` rows of other
-kinds (e.g. `COLLECTOR_EVENTS_WRITE`) are not (D11). Sort order and the `RoleResponse` fields are
-confirmed in S6.
+Paginated list (§2.2), A to Z by `name`. Only roles in our `roles` table are listed; `api_permissions`
+rows of other kinds (e.g. `COLLECTOR_EVENTS_WRITE`) are not (D11). Each item is a `RoleResponse`:
+`id`, `name`, `displayName`, `description` (null if none), `isSystem`, `createdAt`, `updatedAt`.
 
 #### GET /roles/{id}
 
 | Status | Code | When |
 |--------|------|------|
-| 200 | — | Found |
+| 200 | — | Found; the same `RoleResponse` |
 | 404 | `ROLE_NOT_FOUND` | Unknown id |
 
 #### POST /roles
@@ -430,8 +430,8 @@ Create a role (B-40, S6).
 | Field | Type | Required | Rule |
 |-------|------|----------|------|
 | `name` | string | Yes | UPPER_SNAKE_CASE (`^[A-Z][A-Z0-9_]*$`), max 100. **Can never change** |
-| `displayName` | string | Yes | |
-| `description` | string | No | |
+| `displayName` | string | Yes | Not blank, max 255 |
+| `description` | string | No | No limit; blank is stored as none |
 
 An `isSystem` field in the body is ignored; created roles are always `is_system = false`.
 
@@ -443,20 +443,27 @@ An `isSystem` field in the body is ignored; created roles are always `is_system 
 3. name already a permission_name in api_permissions?          yes → 409 DUPLICATE_ROLE_NAME (D11 message)
 4. One transaction: role + default permission row
    (<NAME>, GET, /admin/v1/me/menus) + audit ROLE_CREATED                                   (D4, D6)
-5. Gateway sync → realm role <NAME> created in Keycloak        fails → 502, role stays saved (D3)
+   (another request created the name in between → uk_roles_name → 409, nothing saved)
+5. Commit, then gateway sync → realm role <NAME> created in Keycloak
+                                                               fails → 502, role stays saved (D3)
 6. 201 Created with the role
 ```
 
+The sync runs only after the commit: the gateway reads the table over its own connection and would
+not see uncommitted rows. Locally, the stand-in gateway (developer-setup §10.1) answers the sync.
+
 | Status | Code | When |
 |--------|------|------|
-| 201 | — | Created and synced |
-| 400 | `VALIDATION_ERROR` | Bad name format, missing `displayName` |
-| 409 | `DUPLICATE_ROLE_NAME` | Name taken by a role, or by an existing permission set in the gateway |
-| 502 | `KEYCLOAK_SYNC_FAILED` | Saved, but sync failed — `Role created. <cause> Retry with POST /admin/v1/roles/{id}/sync.` |
+| 201 | — | Created and synced; body = `RoleResponse` |
+| 400 | `VALIDATION_ERROR` | Bad name format or length, missing / blank / too long `displayName` |
+| 409 | `DUPLICATE_ROLE_NAME` | Name taken by a role (also when two requests race: one 201, one 409, never 500), or by an existing permission set in the gateway |
+| 502 | `KEYCLOAK_SYNC_FAILED` | Saved, but sync failed — `Role created. <cause> Retry with POST /admin/v1/roles/<id>/sync.` (the real id) |
 
 #### PUT /roles/{id}
 
-Edit `displayName` and `description` only (B-40, D9). No Keycloak call, no gateway sync.
+Edit `displayName` and `description` only (B-40, D9). No Keycloak call, no gateway sync. The body is
+the complete editable part: `displayName` required (not blank, max 255); a left-out `description`
+means none. Sending the same values as now → `200`, nothing written, no audit row.
 
 | Body `name` | Result |
 |-------------|--------|
@@ -468,10 +475,12 @@ Edit `displayName` and `description` only (B-40, D9). No Keycloak call, no gatew
 **Check order:**
 
 ```
+0. Body valid?         no  → 400 VALIDATION_ERROR
 1. Role exists?        no  → 404 ROLE_NOT_FOUND
-2. System role?        yes → 409 SYSTEM_ROLE_IMMUTABLE   (any change, even displayName)
+2. System role?        yes → 409 SYSTEM_ROLE_IMMUTABLE   (any change, even displayName, even the same values)
 3. Name differs?       yes → 400 VALIDATION_ERROR        (D9 message)
-4. Save + audit ROLE_UPDATED (before/after)  → 200 with the updated role
+4. Same values?        yes → 200, nothing written
+5. Save + audit ROLE_UPDATED (before/after)  → 200 with the updated role
 ```
 
 System is checked before name, so a rename of SUPER_ADMIN gets 409, not a 400 implying the display
@@ -490,8 +499,8 @@ Checks (read only, first failure stops):
 Write (one DB transaction):
  4. delete role_menus for the role
  5. delete api_permissions WHERE permission_name = role name
- 6. delete the role
- 7. audit ROLE_DELETED, before = role + its menus + its permissions
+ 6. delete the role       (a user got the role in between → fk_user_roles_role → 409 ROLE_IN_USE, nothing deleted)
+ 7. audit ROLE_DELETED, before = {role, menus (keys), permissions}
 
 After commit:
  8. Gateway sync → gateway deletes realm role <NAME> in Keycloak
@@ -506,8 +515,8 @@ remove the role from them.
 | 204 | — | Deleted and synced |
 | 404 | `ROLE_NOT_FOUND` | Unknown id |
 | 409 | `SYSTEM_ROLE_IMMUTABLE` | System role |
-| 409 | `ROLE_IN_USE` | Held by any user |
-| 502 | `KEYCLOAK_SYNC_FAILED` | Deleted, but sync failed (D10 message, §5.4). `/roles/{id}/sync` can't be used (the role is gone); the next successful sync of **any** role cleans Keycloak |
+| 409 | `ROLE_IN_USE` | Held by any user (also when a user gets it during the delete) |
+| 502 | `KEYCLOAK_SYNC_FAILED` | Deleted, but sync failed (D10 message, §5.4; the gateway's reason is in the WARN log). `/roles/{id}/sync` can't be used (the role is gone); the next successful sync of **any** role cleans Keycloak |
 
 ---
 
@@ -894,6 +903,10 @@ exception text, SQL, stack trace, host or class name is ever put in `message`.
 | Name used by a gateway permission set (D11, 409) | `This name is already used by an existing permission set in the gateway. Choose another name.` |
 | Keycloak already has the account (S8 rule c, 409 `EMAIL_IN_USE`) | `Keycloak already has an account with this username or email that this service doesn't know. An operator must remove or link it.` |
 | Reset password for a non-ACTIVE user (S10 rule g) | `Activate the user first.` |
+| Unknown role id (404 `ROLE_NOT_FOUND`) | `No role with id <id>.` |
+| Role name taken (409 `DUPLICATE_ROLE_NAME`) | `A role named '<NAME>' already exists.` |
+| System role changed or deleted (409 `SYSTEM_ROLE_IMMUTABLE`) | `'<NAME>' is a system role and can't be changed or deleted.` |
+| Role still held by a user (409 `ROLE_IN_USE`) | `'<NAME>' is still held by at least one user (active or not). Remove it from those users first. Nothing was deleted.` |
 | Unknown menu id (404 `MENU_NOT_FOUND`) | `No menu with id <id>.` |
 | Menu key taken (409 `DUPLICATE_MENU_KEY`) | `A menu with key '<key>' already exists.` |
 | Menu key changed in `PUT` | `Menu key cannot be changed (consoles find their screens by it). To use a different key, create a new menu. Nothing was changed.` |
@@ -925,7 +938,7 @@ The message always says what **was** saved, so the caller knows what to retry.
 
 | Endpoint | `message` |
 |----------|-----------|
-| `POST /roles` | `Role created. <cause> Retry with POST /admin/v1/roles/{id}/sync.` |
+| `POST /roles` | `Role created. <cause> Retry with POST /admin/v1/roles/<id>/sync.` (the real id) |
 | `PUT /roles/{id}/permissions` | `Permissions saved. <cause> Retry with POST /admin/v1/roles/{id}/sync.` |
 | `POST /roles/{id}/sync` | `Sync failed. <cause> Retry with POST /admin/v1/roles/{id}/sync.` |
 | `DELETE /roles/{id}` | `Role deleted. Keycloak still has realm role <NAME> until the next successful sync of any role. No user in this service holds it.` |

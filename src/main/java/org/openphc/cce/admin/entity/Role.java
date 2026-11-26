@@ -1,6 +1,7 @@
 package org.openphc.cce.admin.entity;
 
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.UUID;
 
 import jakarta.persistence.Column;
@@ -46,7 +47,8 @@ public class Role {
 	public void change(String displayName, String description) {
 		this.displayName = displayName;
 		this.description = description;
-		this.updatedAt = Instant.now();
+		// The database keeps microseconds; rounding here makes the reply show the value that is stored
+		this.updatedAt = Instant.now().truncatedTo(ChronoUnit.MICROS);
 	}
 
 	public UUID getId() {

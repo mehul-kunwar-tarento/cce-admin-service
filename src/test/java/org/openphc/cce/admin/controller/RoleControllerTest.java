@@ -15,6 +15,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.sql.Timestamp;
+import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -308,12 +309,17 @@ class RoleControllerTest {
 		UUID id = insertRoleWithDescription("FACILITY_ADMIN", "Facility admin", "Runs one facility");
 		Timestamp updatedAtBefore = updatedAt(id);
 
-		putRole(id, edit("FACILITY_ADMIN", "Site admin", "Runs one site"))
+		String reply = putRole(id, edit("FACILITY_ADMIN", "Site admin", "Runs one site"))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.data.name").value("FACILITY_ADMIN"))
 				.andExpect(jsonPath("$.data.displayName").value("Site admin"))
-				.andExpect(jsonPath("$.data.description").value("Runs one site"));
+				.andExpect(jsonPath("$.data.description").value("Runs one site"))
+				.andReturn().getResponse().getContentAsString();
 		sendPendingWrites();
+
+		// The reply shows exactly the time that was stored
+		String repliedUpdatedAt = objectMapper.readTree(reply).path("data").path("updatedAt").asText();
+		assertThat(Instant.parse(repliedUpdatedAt)).isEqualTo(updatedAt(id).toInstant());
 
 		AuditAssert.exactlyOneRow(jdbc, AuditAction.ROLE_UPDATED, id.toString());
 		Map<String, Object> audit = jdbc.queryForMap("SELECT entity_type, before ->> 'displayName' AS before_name,"
