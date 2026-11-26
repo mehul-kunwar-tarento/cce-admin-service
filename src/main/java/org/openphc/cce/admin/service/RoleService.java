@@ -15,6 +15,7 @@ import org.openphc.cce.admin.dto.CreatedRole;
 import org.openphc.cce.admin.dto.PermissionSnapshot;
 import org.openphc.cce.admin.dto.RoleResponse;
 import org.openphc.cce.admin.dto.RoleSnapshot;
+import org.openphc.cce.admin.dto.UpdateRoleRequest;
 import org.openphc.cce.admin.entity.ApiPermission;
 import org.openphc.cce.admin.entity.Role;
 import org.openphc.cce.admin.error.ApiException;
@@ -34,7 +35,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import jakarta.persistence.EntityManager;
 
-/** Roles: list, read, create, and (later) change and delete. */
+/** Roles: list, read, create, change, and (later) delete. */
 @Service
 public class RoleService {
 
@@ -127,6 +128,41 @@ public class RoleService {
 		return role;
 	}
 
+	/**
+	 * Changes a role's display name and description. Display fields live only in this service, so there is no
+	 * gateway sync. The same values as now write nothing and no audit row.
+	 */
+	@Transactional
+	public RoleResponse update(UUID id, UpdateRoleRequest request) {
+		Optional<Role> found = roleRepository.findById(id);
+		if (found.isEmpty()) {
+			throw notFound(id);
+		}
+		Role role = found.get();
+		// Before the name check: a rename of a system role is refused as "can't change", not as "rename"
+		if (role.isSystem()) {
+			throw systemRole(role.getName());
+		}
+		if (request.name() != null && !request.name().equals(role.getName())) {
+			throw new ApiException(HttpStatus.BAD_REQUEST, ErrorCode.VALIDATION_ERROR,
+					"Role name cannot be changed (it is used in Keycloak and the gateway). Only displayName and"
+							+ " description can be edited. To use a different name, create a new role. Nothing was changed.");
+		}
+
+		RoleSnapshot before = RoleSnapshot.of(role);
+		String description = emptyToNull(request.description());
+		RoleSnapshot wanted = new RoleSnapshot(id, role.getName(), request.displayName(), description, false);
+		if (wanted.equals(before)) {
+			// Same values as now: nothing to save and nothing to audit
+			return RoleResponse.from(role);
+		}
+
+		role.change(request.displayName(), description);
+		roleRepository.saveAndFlush(role);
+		auditWriter.record(AuditAction.ROLE_UPDATED, ENTITY_TYPE, id.toString(), before, RoleSnapshot.of(role));
+		return RoleResponse.from(role);
+	}
+
 	private void syncAfterCreate(UUID roleId) {
 		try {
 			gatewaySyncClient.sync(roleId);
@@ -146,6 +182,11 @@ public class RoleService {
 
 	private ApiException notFound(UUID id) {
 		return new ApiException(HttpStatus.NOT_FOUND, ErrorCode.ROLE_NOT_FOUND, "No role with id " + id + ".");
+	}
+
+	private ApiException systemRole(String name) {
+		return new ApiException(HttpStatus.CONFLICT, ErrorCode.SYSTEM_ROLE_IMMUTABLE,
+				"'" + name + "' is a system role and can't be changed or deleted.");
 	}
 
 	private ApiException duplicateName(String message) {

@@ -42,6 +42,13 @@ public class Role {
 		this.isSystem = false;
 	}
 
+	/** Applies an edit of the display fields and moves updated_at. The name never changes. */
+	public void change(String displayName, String description) {
+		this.displayName = displayName;
+		this.description = description;
+		this.updatedAt = Instant.now();
+	}
+
 	public UUID getId() {
 		return id;
 	}

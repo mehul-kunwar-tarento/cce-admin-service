@@ -8,10 +8,12 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.sql.Timestamp;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -298,10 +300,176 @@ class RoleControllerTest {
 				"This name is already used by an existing permission set in the gateway. Choose another name.");
 	}
 
+	// ---- PUT /roles/{id}: accepted, never syncs ----
+
+	@Test
+	void updateIs200WithBeforeAndAfter() throws Exception {
+		UUID id = insertRoleWithDescription("FACILITY_ADMIN", "Facility admin", "Runs one facility");
+		Timestamp updatedAtBefore = updatedAt(id);
+
+		putRole(id, edit("FACILITY_ADMIN", "Site admin", "Runs one site"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.data.name").value("FACILITY_ADMIN"))
+				.andExpect(jsonPath("$.data.displayName").value("Site admin"))
+				.andExpect(jsonPath("$.data.description").value("Runs one site"));
+		sendPendingWrites();
+
+		AuditAssert.exactlyOneRow(jdbc, AuditAction.ROLE_UPDATED, id.toString());
+		Map<String, Object> audit = jdbc.queryForMap("SELECT entity_type, before ->> 'displayName' AS before_name,"
+				+ " after ->> 'displayName' AS after_name, after ->> 'description' AS after_description"
+				+ " FROM audit_log WHERE entity_id = ?", id.toString());
+		assertThat(audit.get("entity_type")).isEqualTo("ROLE");
+		assertThat(audit.get("before_name")).isEqualTo("Facility admin");
+		assertThat(audit.get("after_name")).isEqualTo("Site admin");
+		assertThat(audit.get("after_description")).isEqualTo("Runs one site");
+		assertThat(updatedAt(id)).isAfter(updatedAtBefore);
+		verifyNoInteractions(gatewaySyncClient);
+	}
+
+	@Test
+	void nameLeftOutIs200() throws Exception {
+		UUID id = insertRoleWithDescription("FACILITY_ADMIN", "Facility admin", null);
+
+		putRole(id, edit(null, "Site admin", null))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.data.displayName").value("Site admin"));
+		verifyNoInteractions(gatewaySyncClient);
+	}
+
+	@Test
+	void sameNameIs200() throws Exception {
+		UUID id = insertRoleWithDescription("FACILITY_ADMIN", "Facility admin", null);
+
+		putRole(id, edit("FACILITY_ADMIN", "Site admin", null))
+				.andExpect(status().isOk());
+		verifyNoInteractions(gatewaySyncClient);
+	}
+
+	@Test
+	void missingDescriptionClearsIt() throws Exception {
+		UUID id = insertRoleWithDescription("FACILITY_ADMIN", "Facility admin", "Runs one facility");
+
+		putRole(id, edit("FACILITY_ADMIN", "Facility admin", null))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.data.description").value(nullValue()));
+		sendPendingWrites();
+
+		String description = jdbc.queryForObject("SELECT description FROM roles WHERE id = ?", String.class, id);
+		assertThat(description).isNull();
+		assertThat(count("SELECT count(*) FROM audit_log WHERE action = 'ROLE_UPDATED'")).isEqualTo(1);
+	}
+
+	@Test
+	void sameValuesWriteNothing() throws Exception {
+		UUID id = insertRoleWithDescription("FACILITY_ADMIN", "Facility admin", "Runs one facility");
+		Timestamp updatedAtBefore = updatedAt(id);
+
+		putRole(id, edit("FACILITY_ADMIN", "Facility admin", "Runs one facility"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.data.displayName").value("Facility admin"));
+		sendPendingWrites();
+
+		assertThat(count("SELECT count(*) FROM audit_log")).isZero();
+		assertThat(updatedAt(id)).isEqualTo(updatedAtBefore);
+		verifyNoInteractions(gatewaySyncClient);
+	}
+
+	// ---- PUT /roles/{id}: rejected, nothing changed ----
+
+	@Test
+	void unknownRoleIs404OnPut() throws Exception {
+		putRole(UUID.fromString("00000000-0000-0000-0000-000000000001"), edit(null, "Site admin", null))
+				.andExpect(status().isNotFound())
+				.andExpect(content().json(errorJson("ROLE_NOT_FOUND",
+						"No role with id 00000000-0000-0000-0000-000000000001."), JsonCompareMode.STRICT));
+	}
+
+	@Test
+	void superAdminIs409() throws Exception {
+		expectUpdateRejected(superAdminId(), edit(null, "Admins", null), 409, "SYSTEM_ROLE_IMMUTABLE",
+				"'SUPER_ADMIN' is a system role and can't be changed or deleted.");
+	}
+
+	@Test
+	void superAdminRenameIs409NotA400() throws Exception {
+		expectUpdateRejected(superAdminId(), edit("ADMIN", "Super Admin", null), 409, "SYSTEM_ROLE_IMMUTABLE",
+				"'SUPER_ADMIN' is a system role and can't be changed or deleted.");
+	}
+
+	@Test
+	void differentNameIs400() throws Exception {
+		UUID id = insertRoleWithDescription("FACILITY_ADMIN", "Facility admin", null);
+		expectUpdateRejected(id, edit("SITE_ADMIN", "Facility admin", null), 400, "VALIDATION_ERROR",
+				"Role name cannot be changed (it is used in Keycloak and the gateway). Only displayName and"
+						+ " description can be edited. To use a different name, create a new role. Nothing was changed.");
+	}
+
+	@Test
+	void missingDisplayNameIs400OnPut() throws Exception {
+		UUID id = insertRoleWithDescription("FACILITY_ADMIN", "Facility admin", null);
+		expectUpdateRejected(id, edit("FACILITY_ADMIN", null, null), 400, "VALIDATION_ERROR",
+				"Invalid request: displayName must not be blank.");
+	}
+
+	@Test
+	void tooLongDisplayNameIs400OnPut() throws Exception {
+		UUID id = insertRoleWithDescription("FACILITY_ADMIN", "Facility admin", null);
+		expectUpdateRejected(id, edit("FACILITY_ADMIN", "x".repeat(256), null), 400, "VALIDATION_ERROR",
+				"Invalid request: displayName size must be between 0 and 255.");
+	}
+
 	// ---- helpers ----
 
 	private ResultActions getRoles(String rest) throws Exception {
 		return mockMvc.perform(get("/admin/v1/roles" + rest).header("Authorization", "Bearer " + tokens.forUser("kc-admin")));
+	}
+
+	private ResultActions putRole(UUID id, Map<String, Object> body) throws Exception {
+		return mockMvc.perform(put("/admin/v1/roles/" + id)
+				.header("Authorization", "Bearer " + tokens.forUser("kc-admin"))
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(objectMapper.writeValueAsString(body)));
+	}
+
+	/** The given error; the role row is unchanged, no audit row, no sync. */
+	private void expectUpdateRejected(UUID id, Map<String, Object> body, int status, String code, String message)
+			throws Exception {
+		Map<String, Object> rowBefore = jdbc.queryForMap("SELECT * FROM roles WHERE id = ?", id);
+
+		putRole(id, body)
+				.andExpect(status().is(status))
+				.andExpect(content().json(errorJson(code, message), JsonCompareMode.STRICT));
+		sendPendingWrites();
+
+		assertThat(jdbc.queryForMap("SELECT * FROM roles WHERE id = ?", id)).isEqualTo(rowBefore);
+		assertThat(count("SELECT count(*) FROM audit_log")).isZero();
+		verifyNoInteractions(gatewaySyncClient);
+	}
+
+	/** A PUT body; a null name or description is left out. */
+	private Map<String, Object> edit(String name, String displayName, String description) {
+		Map<String, Object> body = new LinkedHashMap<>();
+		if (name != null) {
+			body.put("name", name);
+		}
+		body.put("displayName", displayName);
+		if (description != null) {
+			body.put("description", description);
+		}
+		return body;
+	}
+
+	private UUID insertRoleWithDescription(String name, String displayName, String description) {
+		return jdbc.queryForObject("INSERT INTO roles (name, display_name, description) VALUES (?, ?, ?) RETURNING id",
+				UUID.class, name, displayName, description);
+	}
+
+	private UUID superAdminId() {
+		return jdbc.queryForObject("SELECT id FROM roles WHERE name = 'SUPER_ADMIN'", UUID.class);
+	}
+
+	private Timestamp updatedAt(UUID id) {
+		return jdbc.queryForObject("SELECT updated_at FROM roles WHERE id = ?", Timestamp.class, id);
 	}
 
 	private ResultActions postRole(Map<String, Object> body) throws Exception {
