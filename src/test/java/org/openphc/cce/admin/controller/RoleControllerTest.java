@@ -6,6 +6,7 @@ import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -418,10 +419,92 @@ class RoleControllerTest {
 				"Invalid request: displayName size must be between 0 and 255.");
 	}
 
+	// ---- DELETE /roles/{id} ----
+
+	@Test
+	void deleteIs204WithEverythingGone() throws Exception {
+		UUID id = insertRoleWithDescription("FACILITY_ADMIN", "Facility admin", null);
+		linkMenu(id, "dashboard");
+		linkMenu(id, "compliance");
+		jdbc.update("INSERT INTO api_permissions (permission_name, http_method, uri_pattern) VALUES"
+				+ " ('FACILITY_ADMIN', 'GET', '/admin/v1/me/menus'), ('FACILITY_ADMIN', 'GET', '/insights/v1/**')");
+		// Another permission set that must not be touched
+		jdbc.update("INSERT INTO api_permissions (permission_name, http_method, uri_pattern)"
+				+ " VALUES ('COLLECTOR_EVENTS_WRITE', 'POST', '/collector/v1/events')");
+
+		mockMvc.perform(delete("/admin/v1/roles/" + id).header("Authorization", "Bearer " + tokens.forUser("kc-admin")))
+				.andExpect(status().isNoContent())
+				.andExpect(content().string(""));
+		sendPendingWrites();
+
+		assertThat(count("SELECT count(*) FROM roles WHERE name = 'FACILITY_ADMIN'")).isZero();
+		assertThat(count("SELECT count(*) FROM role_menus WHERE role_id = '" + id + "'")).isZero();
+		assertThat(count("SELECT count(*) FROM api_permissions WHERE permission_name = 'FACILITY_ADMIN'")).isZero();
+		assertThat(count("SELECT count(*) FROM api_permissions WHERE permission_name = 'COLLECTOR_EVENTS_WRITE'"))
+				.isEqualTo(1);
+		assertThat(count("SELECT count(*) FROM api_permissions WHERE permission_name = 'SUPER_ADMIN'")).isEqualTo(5);
+
+		AuditAssert.exactlyOneRow(jdbc, AuditAction.ROLE_DELETED, id.toString());
+		Map<String, Object> audit = jdbc.queryForMap("SELECT before -> 'role' ->> 'name' AS role_name,"
+				+ " before -> 'menus' AS menus, jsonb_array_length(before -> 'permissions') AS permissions, after"
+				+ " FROM audit_log WHERE entity_id = ?", id.toString());
+		assertThat(audit.get("role_name")).isEqualTo("FACILITY_ADMIN");
+		assertThat(objectMapper.readTree(audit.get("menus").toString()).toString())
+				.isEqualTo("[\"compliance\",\"dashboard\"]");
+		assertThat(audit.get("permissions")).isEqualTo(2);
+		assertThat(audit.get("after")).isNull();
+		verify(gatewaySyncClient, times(1)).sync(id);
+	}
+
+	@Test
+	void deleteUnknownRoleIs404() throws Exception {
+		mockMvc.perform(delete("/admin/v1/roles/00000000-0000-0000-0000-000000000001")
+				.header("Authorization", "Bearer " + tokens.forUser("kc-admin")))
+				.andExpect(status().isNotFound())
+				.andExpect(content().json(errorJson("ROLE_NOT_FOUND",
+						"No role with id 00000000-0000-0000-0000-000000000001."), JsonCompareMode.STRICT));
+		verifyNoInteractions(gatewaySyncClient);
+	}
+
+	@Test
+	void deleteSuperAdminIs409() throws Exception {
+		expectDeleteRejected(superAdminId(), "SYSTEM_ROLE_IMMUTABLE",
+				"'SUPER_ADMIN' is a system role and can't be changed or deleted.");
+	}
+
+	@Test
+	void deleteRoleHeldByAnInactiveUserIs409() throws Exception {
+		UUID id = insertRoleWithDescription("FACILITY_ADMIN", "Facility admin", null);
+		linkMenu(id, "dashboard");
+		UUID ravi = jdbc.queryForObject("INSERT INTO users (keycloak_id, username, email, status)"
+				+ " VALUES ('kc-ravi', 'ravi', 'ravi@x.com', 'INACTIVE') RETURNING id", UUID.class);
+		jdbc.update("INSERT INTO user_roles (user_id, role_id) VALUES (?, ?)", ravi, id);
+
+		expectDeleteRejected(id, "ROLE_IN_USE", "'FACILITY_ADMIN' is still held by at least one user (active or not)."
+				+ " Remove it from those users first. Nothing was deleted.");
+		assertThat(count("SELECT count(*) FROM role_menus WHERE role_id = '" + id + "'")).isEqualTo(1);
+	}
+
 	// ---- helpers ----
 
 	private ResultActions getRoles(String rest) throws Exception {
 		return mockMvc.perform(get("/admin/v1/roles" + rest).header("Authorization", "Bearer " + tokens.forUser("kc-admin")));
+	}
+
+	/** The given 409; the role is still there, no audit row, no sync. */
+	private void expectDeleteRejected(UUID id, String code, String message) throws Exception {
+		mockMvc.perform(delete("/admin/v1/roles/" + id).header("Authorization", "Bearer " + tokens.forUser("kc-admin")))
+				.andExpect(status().isConflict())
+				.andExpect(content().json(errorJson(code, message), JsonCompareMode.STRICT));
+		sendPendingWrites();
+
+		assertThat(count("SELECT count(*) FROM roles WHERE id = '" + id + "'")).isEqualTo(1);
+		assertThat(count("SELECT count(*) FROM audit_log")).isZero();
+		verifyNoInteractions(gatewaySyncClient);
+	}
+
+	private void linkMenu(UUID roleId, String menuKey) {
+		jdbc.update("INSERT INTO role_menus (role_id, menu_id) SELECT ?, id FROM menus WHERE key = ?", roleId, menuKey);
 	}
 
 	private ResultActions putRole(UUID id, Map<String, Object> body) throws Exception {

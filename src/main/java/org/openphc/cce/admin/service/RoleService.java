@@ -12,17 +12,21 @@ import org.openphc.cce.admin.client.GatewaySyncClient;
 import org.openphc.cce.admin.client.GatewaySyncException;
 import org.openphc.cce.admin.dto.CreateRoleRequest;
 import org.openphc.cce.admin.dto.CreatedRole;
+import org.openphc.cce.admin.dto.DeletedRole;
 import org.openphc.cce.admin.dto.PermissionSnapshot;
 import org.openphc.cce.admin.dto.RoleResponse;
 import org.openphc.cce.admin.dto.RoleSnapshot;
 import org.openphc.cce.admin.dto.UpdateRoleRequest;
 import org.openphc.cce.admin.entity.ApiPermission;
 import org.openphc.cce.admin.entity.Role;
+import org.openphc.cce.admin.entity.RoleMenu;
 import org.openphc.cce.admin.error.ApiException;
 import org.openphc.cce.admin.error.ConstraintViolations;
 import org.openphc.cce.admin.error.ErrorCode;
 import org.openphc.cce.admin.repository.ApiPermissionRepository;
+import org.openphc.cce.admin.repository.RoleMenuRepository;
 import org.openphc.cce.admin.repository.RoleRepository;
+import org.openphc.cce.admin.repository.UserRoleRepository;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -35,7 +39,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import jakarta.persistence.EntityManager;
 
-/** Roles: list, read, create, change, and (later) delete. */
+/** Roles: list, read, create, change and delete. */
 @Service
 public class RoleService {
 
@@ -45,19 +49,26 @@ public class RoleService {
 	private static final String SIDEBAR_PATH = "/admin/v1/me/menus";
 	// The unique constraint on roles.name; the guard against two creates racing past the check in insertRole
 	private static final String NAME_CONSTRAINT = "uk_roles_name";
+	// The link from user_roles to roles; the guard against a user getting the role while it is being deleted
+	private static final String USER_ROLE_CONSTRAINT = "fk_user_roles_role";
 
 	private final RoleRepository roleRepository;
 	private final ApiPermissionRepository apiPermissionRepository;
+	private final RoleMenuRepository roleMenuRepository;
+	private final UserRoleRepository userRoleRepository;
 	private final AuditWriter auditWriter;
 	private final GatewaySyncClient gatewaySyncClient;
 	private final EntityManager entityManager;
 	private final TransactionTemplate newTransaction;
 
 	public RoleService(RoleRepository roleRepository, ApiPermissionRepository apiPermissionRepository,
-			AuditWriter auditWriter, GatewaySyncClient gatewaySyncClient, EntityManager entityManager,
+			RoleMenuRepository roleMenuRepository, UserRoleRepository userRoleRepository, AuditWriter auditWriter,
+			GatewaySyncClient gatewaySyncClient, EntityManager entityManager,
 			PlatformTransactionManager transactionManager) {
 		this.roleRepository = roleRepository;
 		this.apiPermissionRepository = apiPermissionRepository;
+		this.roleMenuRepository = roleMenuRepository;
+		this.userRoleRepository = userRoleRepository;
 		this.auditWriter = auditWriter;
 		this.gatewaySyncClient = gatewaySyncClient;
 		this.entityManager = entityManager;
@@ -163,6 +174,71 @@ public class RoleService {
 		return RoleResponse.from(role);
 	}
 
+	/**
+	 * Deletes a role that no user holds: its menu links, its permission rows and the role, with the audit row,
+	 * in one transaction. After the commit the gateway finds no rows for the name and removes the realm role.
+	 * A failed sync leaves the delete in place.
+	 */
+	public void delete(UUID id) {
+		String name = newTransaction.execute(status -> deleteRole(id));
+		// Committed: the gateway now finds no rows for the name and removes the realm role
+		syncAfterDelete(id, name);
+	}
+
+	/** The checks, then the delete and its audit row. Returns the deleted role's name. */
+	private String deleteRole(UUID id) {
+		Optional<Role> found = roleRepository.findById(id);
+		if (found.isEmpty()) {
+			throw notFound(id);
+		}
+		Role role = found.get();
+		if (role.isSystem()) {
+			throw systemRole(role.getName());
+		}
+		// Users who are not active count too: they get their roles back when they are activated again
+		if (userRoleRepository.existsByRoleId(id)) {
+			throw roleInUse(role.getName());
+		}
+
+		List<RoleMenu> links = roleMenuRepository.findByRoleId(id);
+		List<String> menuKeys = roleMenuRepository.findMenuKeysOfRole(id);
+		// Only the rows named after this role; other permission sets in the table are never touched
+		List<ApiPermission> rows = apiPermissionRepository.findByPermissionNameOrderById(role.getName());
+		List<PermissionSnapshot> permissions = new ArrayList<>();
+		for (ApiPermission row : rows) {
+			permissions.add(PermissionSnapshot.of(row));
+		}
+		DeletedRole before = new DeletedRole(RoleSnapshot.of(role), menuKeys, permissions);
+
+		roleMenuRepository.deleteAll(links);
+		apiPermissionRepository.deleteAll(rows);
+		roleRepository.delete(role);
+		try {
+			// Delete now rather than at commit, so a database error surfaces here
+			roleRepository.flush();
+		} catch (DataIntegrityViolationException e) {
+			// A user got the role between the check above and this delete
+			if (ConstraintViolations.isViolationOf(e, USER_ROLE_CONSTRAINT)) {
+				throw roleInUse(role.getName());
+			}
+			throw e;
+		}
+
+		auditWriter.record(AuditAction.ROLE_DELETED, ENTITY_TYPE, id.toString(), before, null);
+		return role.getName();
+	}
+
+	private void syncAfterDelete(UUID roleId, String name) {
+		try {
+			gatewaySyncClient.sync(roleId);
+		} catch (GatewaySyncException e) {
+			// The role is gone, so it can't be synced on its own; the gateway's reason is in the warning log
+			throw new ApiException(HttpStatus.BAD_GATEWAY, ErrorCode.KEYCLOAK_SYNC_FAILED,
+					"Role deleted. Keycloak still has realm role " + name + " until the next successful sync of any"
+							+ " role. No user in this service holds it.");
+		}
+	}
+
 	private void syncAfterCreate(UUID roleId) {
 		try {
 			gatewaySyncClient.sync(roleId);
@@ -187,6 +263,11 @@ public class RoleService {
 	private ApiException systemRole(String name) {
 		return new ApiException(HttpStatus.CONFLICT, ErrorCode.SYSTEM_ROLE_IMMUTABLE,
 				"'" + name + "' is a system role and can't be changed or deleted.");
+	}
+
+	private ApiException roleInUse(String name) {
+		return new ApiException(HttpStatus.CONFLICT, ErrorCode.ROLE_IN_USE, "'" + name + "' is still held by at least"
+				+ " one user (active or not). Remove it from those users first. Nothing was deleted.");
 	}
 
 	private ApiException duplicateName(String message) {

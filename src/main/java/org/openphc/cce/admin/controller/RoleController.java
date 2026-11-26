@@ -11,6 +11,7 @@ import org.openphc.cce.admin.dto.UpdateRoleRequest;
 import org.openphc.cce.admin.service.RoleService;
 import org.springframework.data.domain.Page;
 import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -51,5 +52,11 @@ public class RoleController {
 	@PutMapping("/admin/v1/roles/{id}")
 	public ApiResponse<RoleResponse> update(@PathVariable UUID id, @Valid @RequestBody UpdateRoleRequest request) {
 		return ApiResponse.of(roleService.update(id, request));
+	}
+
+	@DeleteMapping("/admin/v1/roles/{id}")
+	@ResponseStatus(HttpStatus.NO_CONTENT)
+	public void delete(@PathVariable UUID id) {
+		roleService.delete(id);
 	}
 }
