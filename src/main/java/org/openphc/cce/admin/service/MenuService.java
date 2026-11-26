@@ -7,6 +7,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
+import org.hibernate.exception.ConstraintViolationException;
 import org.openphc.cce.admin.audit.AuditAction;
 import org.openphc.cce.admin.audit.AuditWriter;
 import org.openphc.cce.admin.dto.MenuRequest;
@@ -17,6 +18,7 @@ import org.openphc.cce.admin.entity.MenuType;
 import org.openphc.cce.admin.error.ApiException;
 import org.openphc.cce.admin.error.ErrorCode;
 import org.openphc.cce.admin.repository.MenuRepository;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -26,6 +28,8 @@ import org.springframework.transaction.annotation.Transactional;
 public class MenuService {
 
 	private static final String ENTITY_TYPE = "MENU";
+	// The unique constraint on menus.key; the guard against two creates racing past the check in create
+	private static final String KEY_CONSTRAINT = "uk_menus_key";
 
 	private final MenuRepository menuRepository;
 	private final AuditWriter auditWriter;
@@ -68,13 +72,24 @@ public class MenuService {
 	/** Saves a new menu and its audit row in one transaction. */
 	@Transactional
 	public MenuResponse create(MenuRequest request) {
+		if (menuRepository.existsByKey(request.key())) {
+			throw duplicateKey(request.key());
+		}
 		MenuType type = MenuType.valueOf(request.type());
 		checkParent(type, request.parentId());
 
 		Menu menu = new Menu(request.key(), request.label(), request.path(), emptyToNull(request.icon()), type,
 				request.parentId(), request.sortOrder(), activeOrDefault(request.isActive()));
-		// Insert now rather than at commit, so a database error surfaces on this line, inside this method
-		menuRepository.saveAndFlush(menu);
+		try {
+			// Insert now rather than at commit, so a database error surfaces here
+			menuRepository.saveAndFlush(menu);
+		} catch (DataIntegrityViolationException e) {
+			// Another request created the same key between the check above and this insert
+			if (violates(e, KEY_CONSTRAINT)) {
+				throw duplicateKey(request.key());
+			}
+			throw e;
+		}
 
 		auditWriter.record(AuditAction.MENU_CREATED, ENTITY_TYPE, menu.getId().toString(), null,
 				MenuSnapshot.of(menu));
@@ -117,6 +132,20 @@ public class MenuService {
 			return true;
 		}
 		return isActive;
+	}
+
+	/** Whether the database refused the row because of this constraint (and not some other one). */
+	private boolean violates(DataIntegrityViolationException e, String constraintName) {
+		if (!(e.getCause() instanceof ConstraintViolationException)) {
+			return false;
+		}
+		ConstraintViolationException violation = (ConstraintViolationException) e.getCause();
+		return constraintName.equals(violation.getConstraintName());
+	}
+
+	private ApiException duplicateKey(String key) {
+		return new ApiException(HttpStatus.CONFLICT, ErrorCode.DUPLICATE_MENU_KEY,
+				"A menu with key '" + key + "' already exists.");
 	}
 
 	private ApiException invalid(String message) {

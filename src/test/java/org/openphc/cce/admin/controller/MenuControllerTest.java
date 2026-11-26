@@ -300,6 +300,21 @@ class MenuControllerTest {
 		expectRejected(body, "Invalid request: label must not be blank; path must not be blank.");
 	}
 
+	// ---- POST /menus: duplicate key ----
+
+	@Test
+	void existingKeyIs409() throws Exception {
+		postMenu(nav("dashboard"))
+				.andExpect(status().isConflict())
+				.andExpect(content().json("{\"error\":{\"code\":\"DUPLICATE_MENU_KEY\","
+						+ "\"message\":\"A menu with key 'dashboard' already exists.\"}}", JsonCompareMode.STRICT));
+
+		Integer menus = jdbc.queryForObject("SELECT count(*) FROM menus", Integer.class);
+		Integer auditRows = jdbc.queryForObject("SELECT count(*) FROM audit_log", Integer.class);
+		assertThat(menus).isEqualTo(12);
+		assertThat(auditRows).isZero();
+	}
+
 	// ---- POST /menus: rejected by the parent rules ----
 
 	@Test

@@ -10,4 +10,6 @@ public interface MenuRepository extends JpaRepository<Menu, UUID> {
 
 	/** Every menu, in sidebar order; two menus with the same sortOrder are ordered by key. */
 	List<Menu> findAllByOrderBySortOrderAscKeyAsc();
+
+	boolean existsByKey(String key);
 }
