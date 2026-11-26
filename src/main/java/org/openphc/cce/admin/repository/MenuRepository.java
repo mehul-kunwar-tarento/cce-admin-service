@@ -12,4 +12,6 @@ public interface MenuRepository extends JpaRepository<Menu, UUID> {
 	List<Menu> findAllByOrderBySortOrderAscKeyAsc();
 
 	boolean existsByKey(String key);
+
+	boolean existsByParentId(UUID parentId);
 }

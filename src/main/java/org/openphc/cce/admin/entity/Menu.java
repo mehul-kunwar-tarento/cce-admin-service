@@ -56,6 +56,19 @@ public class Menu {
 		this.isActive = isActive;
 	}
 
+	/** Applies an edit and moves updated_at. The key never changes, so it is not a parameter. */
+	public void change(String label, String path, String icon, MenuType type, UUID parentId, int sortOrder,
+			boolean isActive) {
+		this.label = label;
+		this.path = path;
+		this.icon = icon;
+		this.type = type;
+		this.parentId = parentId;
+		this.sortOrder = sortOrder;
+		this.isActive = isActive;
+		this.updatedAt = Instant.now();
+	}
+
 	public UUID getId() {
 		return id;
 	}

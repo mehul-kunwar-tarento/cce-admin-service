@@ -21,6 +21,7 @@ import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 /**
@@ -72,6 +73,13 @@ public class GlobalExceptionHandler {
 	@ExceptionHandler(HttpMessageNotReadableException.class)
 	public ResponseEntity<ErrorResponse> handleUnreadableBody() {
 		String message = "Request body is not valid JSON, or a field has the wrong type.";
+		return build(HttpStatus.BAD_REQUEST, ErrorCode.VALIDATION_ERROR, message);
+	}
+
+	/** A value in the URL of the wrong type, e.g. /menus/abc where an id is expected. */
+	@ExceptionHandler(MethodArgumentTypeMismatchException.class)
+	public ResponseEntity<ErrorResponse> handleWrongTypeInUrl(MethodArgumentTypeMismatchException e) {
+		String message = "Invalid request: " + e.getName() + " has an invalid value.";
 		return build(HttpStatus.BAD_REQUEST, ErrorCode.VALIDATION_ERROR, message);
 	}
 

@@ -23,7 +23,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-/** The menu catalog: read as a tree, create, and (later) change and delete. */
+/** The menu catalog: read as a tree, create, change, and (later) delete. */
 @Service
 public class MenuService {
 
@@ -96,6 +96,52 @@ public class MenuService {
 		return MenuResponse.from(menu);
 	}
 
+	/**
+	 * Replaces a menu with the complete new version in the request. Every check only reads; nothing is
+	 * written until all pass. The same values as now write nothing and no audit row.
+	 */
+	@Transactional
+	public MenuResponse update(UUID id, MenuRequest request) {
+		Optional<Menu> found = menuRepository.findById(id);
+		if (found.isEmpty()) {
+			throw notFound(id);
+		}
+		Menu menu = found.get();
+		if (!menu.getKey().equals(request.key())) {
+			throw invalid("Menu key cannot be changed (consoles find their screens by it). To use a different"
+					+ " key, create a new menu. Nothing was changed.");
+		}
+		// Optional on create, but an edit sends the whole menu: a missing value must not quietly show a hidden menu
+		if (request.isActive() == null) {
+			throw invalid("Invalid request: isActive must not be null.");
+		}
+		// Before the parent rules: a NAV pointing at itself would pass them as "a NAV parent"
+		if (id.equals(request.parentId())) {
+			throw invalid("A menu cannot be its own parent.");
+		}
+		MenuType type = MenuType.valueOf(request.type());
+		checkParent(type, request.parentId());
+		if (type == MenuType.DETAIL && menuRepository.existsByParentId(id)) {
+			throw invalid("'" + menu.getKey() + "' has DETAIL menus under it, so it can't become a DETAIL."
+					+ " Move or delete them first. Nothing was changed.");
+		}
+
+		MenuSnapshot before = MenuSnapshot.of(menu);
+		String icon = emptyToNull(request.icon());
+		MenuSnapshot wanted = new MenuSnapshot(id, menu.getKey(), request.label(), request.path(), icon, type,
+				request.parentId(), request.sortOrder(), request.isActive());
+		if (wanted.equals(before)) {
+			// Same values as now: nothing to save and nothing to audit
+			return MenuResponse.from(menu);
+		}
+
+		menu.change(request.label(), request.path(), icon, type, request.parentId(), request.sortOrder(),
+				request.isActive());
+		menuRepository.saveAndFlush(menu);
+		auditWriter.record(AuditAction.MENU_UPDATED, ENTITY_TYPE, id.toString(), before, MenuSnapshot.of(menu));
+		return MenuResponse.from(menu);
+	}
+
 	/** NAV has no parent; DETAIL has a parent that exists and is a NAV. */
 	private void checkParent(MenuType type, UUID parentId) {
 		if (type == MenuType.NAV) {
@@ -141,6 +187,10 @@ public class MenuService {
 		}
 		ConstraintViolationException violation = (ConstraintViolationException) e.getCause();
 		return constraintName.equals(violation.getConstraintName());
+	}
+
+	private ApiException notFound(UUID id) {
+		return new ApiException(HttpStatus.NOT_FOUND, ErrorCode.MENU_NOT_FOUND, "No menu with id " + id + ".");
 	}
 
 	private ApiException duplicateKey(String key) {

@@ -9,6 +9,7 @@ public enum AuditAction {
 	ROLE_DELETED,
 	ROLE_MENUS_UPDATED,
 	MENU_CREATED,
+	MENU_UPDATED,
 
 	// A change that reached Keycloak but not our database (or the reverse), kept for an operator to fix
 	USER_CREATE_FAILED,

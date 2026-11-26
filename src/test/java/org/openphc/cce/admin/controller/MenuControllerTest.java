@@ -7,10 +7,12 @@ import static org.hamcrest.Matchers.empty;
 import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.sql.Timestamp;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
@@ -342,6 +344,192 @@ class MenuControllerTest {
 				"The parent of a DETAIL menu must be a NAV menu; 'patient-detail' is a DETAIL.");
 	}
 
+	// ---- PUT /menus/{id}: accepted ----
+
+	@Test
+	void changingTheLabelIs200WithBeforeAndAfter() throws Exception {
+		UUID eventsId = menuId("events");
+		Timestamp updatedAtBefore = updatedAt(eventsId);
+		Map<String, Object> body = currentBody("events");
+		body.put("label", "Event stream");
+
+		putMenu(eventsId, body)
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.data.id").value(eventsId.toString()))
+				.andExpect(jsonPath("$.data.key").value("events"))
+				.andExpect(jsonPath("$.data.label").value("Event stream"))
+				.andExpect(jsonPath("$.data.sortOrder").value(80));
+		sendPendingWrites();
+
+		AuditAssert.exactlyOneRow(jdbc, AuditAction.MENU_UPDATED, eventsId.toString());
+		Map<String, Object> audit = jdbc.queryForMap("SELECT entity_type, before ->> 'label' AS before_label,"
+				+ " after ->> 'label' AS after_label, after ->> 'path' AS after_path FROM audit_log WHERE entity_id = ?",
+				eventsId.toString());
+		assertThat(audit.get("entity_type")).isEqualTo("MENU");
+		assertThat(audit.get("before_label")).isEqualTo("Events");
+		assertThat(audit.get("after_label")).isEqualTo("Event stream");
+		assertThat(audit.get("after_path")).as("unchanged fields are in after too").isEqualTo("/events");
+		assertThat(updatedAt(eventsId)).isAfter(updatedAtBefore);
+	}
+
+	@Test
+	void eachEditableFieldWritesOneAuditRow() throws Exception {
+		UUID eventsId = menuId("events");
+		Map<String, Object> changes = new LinkedHashMap<>();
+		changes.put("label", "Event stream");
+		changes.put("path", "/event-stream");
+		changes.put("icon", "BellIcon");
+		changes.put("sortOrder", 85);
+		changes.put("isActive", false);
+
+		int expectedRows = 0;
+		for (Map.Entry<String, Object> change : changes.entrySet()) {
+			Map<String, Object> body = currentBody("events");
+			body.put(change.getKey(), change.getValue());
+
+			putMenu(eventsId, body)
+					.andExpect(status().isOk())
+					.andExpect(jsonPath("$.data." + change.getKey()).value(change.getValue()));
+			sendPendingWrites();
+
+			expectedRows++;
+			Integer rows = jdbc.queryForObject("SELECT count(*) FROM audit_log WHERE action = 'MENU_UPDATED'",
+					Integer.class);
+			assertThat(rows).as("after changing %s", change.getKey()).isEqualTo(expectedRows);
+		}
+	}
+
+	@Test
+	void sameValuesWriteNothing() throws Exception {
+		UUID eventsId = menuId("events");
+		Timestamp updatedAtBefore = updatedAt(eventsId);
+
+		putMenu(eventsId, currentBody("events"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.data.label").value("Events"));
+		sendPendingWrites();
+
+		Integer auditRows = jdbc.queryForObject("SELECT count(*) FROM audit_log", Integer.class);
+		assertThat(auditRows).isZero();
+		assertThat(updatedAt(eventsId)).isEqualTo(updatedAtBefore);
+	}
+
+	@Test
+	void detailCanMoveToAnotherNav() throws Exception {
+		UUID patientDetailId = menuId("patient-detail");
+		UUID complianceId = menuId("compliance");
+		Map<String, Object> body = currentBody("patient-detail");
+		body.put("parentId", complianceId.toString());
+
+		putMenu(patientDetailId, body)
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.data.parentId").value(complianceId.toString()));
+	}
+
+	@Test
+	void childlessDetailCanBecomeANav() throws Exception {
+		UUID patientDetailId = menuId("patient-detail");
+		Map<String, Object> body = currentBody("patient-detail");
+		body.put("type", "NAV");
+		body.remove("parentId");
+
+		putMenu(patientDetailId, body)
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.data.type").value("NAV"))
+				.andExpect(jsonPath("$.data.parentId").value(nullValue()));
+	}
+
+	// ---- PUT /menus/{id}: rejected ----
+
+	@Test
+	void unknownIdIs404() throws Exception {
+		UUID unknown = UUID.fromString("00000000-0000-0000-0000-000000000001");
+		putMenu(unknown, currentBody("events"))
+				.andExpect(status().isNotFound())
+				.andExpect(content().json(errorJson("MENU_NOT_FOUND",
+						"No menu with id 00000000-0000-0000-0000-000000000001."), JsonCompareMode.STRICT));
+	}
+
+	@Test
+	void differentKeyIs400() throws Exception {
+		Map<String, Object> body = currentBody("events");
+		body.put("key", "event-stream");
+		expectPutRejected("events", body, "Menu key cannot be changed (consoles find their screens by it)."
+				+ " To use a different key, create a new menu. Nothing was changed.");
+	}
+
+	@Test
+	void missingIsActiveIs400() throws Exception {
+		Map<String, Object> body = currentBody("events");
+		body.remove("isActive");
+		expectPutRejected("events", body, "Invalid request: isActive must not be null.");
+	}
+
+	@Test
+	void shapeChecksRunOnPutToo() throws Exception {
+		Map<String, Object> body = currentBody("events");
+		body.put("label", "   ");
+		expectPutRejected("events", body, "Invalid request: label must not be blank.");
+	}
+
+	@Test
+	void ownIdAsParentIs400() throws Exception {
+		// events is a NAV, so without the self check it would pass as "a NAV parent"
+		Map<String, Object> body = currentBody("events");
+		body.put("type", "DETAIL");
+		body.put("parentId", menuId("events").toString());
+		expectPutRejected("events", body, "A menu cannot be its own parent.");
+	}
+
+	@Test
+	void navWithParentIs400OnPut() throws Exception {
+		Map<String, Object> body = currentBody("events");
+		body.put("parentId", menuId("compliance").toString());
+		expectPutRejected("events", body, "A NAV menu has no parent; leave parentId empty.");
+	}
+
+	@Test
+	void detailWithoutParentIs400OnPut() throws Exception {
+		Map<String, Object> body = currentBody("patient-detail");
+		body.remove("parentId");
+		expectPutRejected("patient-detail", body, "A DETAIL menu needs a NAV parent in parentId.");
+	}
+
+	@Test
+	void unknownParentIs400OnPut() throws Exception {
+		Map<String, Object> body = currentBody("patient-detail");
+		body.put("parentId", "00000000-0000-0000-0000-000000000001");
+		expectPutRejected("patient-detail", body, "parentId 00000000-0000-0000-0000-000000000001 is not a menu.");
+	}
+
+	@Test
+	void detailUnderDetailIs400OnPut() throws Exception {
+		Map<String, Object> body = currentBody("patient-detail");
+		body.put("parentId", menuId("protocol-detail").toString());
+		expectPutRejected("patient-detail", body,
+				"The parent of a DETAIL menu must be a NAV menu; 'protocol-detail' is a DETAIL.");
+	}
+
+	@Test
+	void navWithChildrenCannotBecomeDetail() throws Exception {
+		Map<String, Object> body = currentBody("compliance");
+		body.put("type", "DETAIL");
+		body.put("parentId", menuId("dashboard").toString());
+		expectPutRejected("compliance", body, "'compliance' has DETAIL menus under it, so it can't become a DETAIL."
+				+ " Move or delete them first. Nothing was changed.");
+	}
+
+	@Test
+	void idThatIsNotAUuidIs400() throws Exception {
+		mockMvc.perform(put("/admin/v1/menus/abc")
+				.header("Authorization", "Bearer " + tokens.forUser("kc-admin"))
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(objectMapper.writeValueAsString(currentBody("events"))))
+				.andExpect(status().isBadRequest())
+				.andExpect(content().json(errorJson("VALIDATION_ERROR", "Invalid request: id has an invalid value."),
+						JsonCompareMode.STRICT));
+	}
+
 	// ---- helpers ----
 
 	private ResultActions getMenus() throws Exception {
@@ -353,6 +541,54 @@ class MenuControllerTest {
 				.header("Authorization", "Bearer " + tokens.forUser("kc-admin"))
 				.contentType(MediaType.APPLICATION_JSON)
 				.content(objectMapper.writeValueAsString(body)));
+	}
+
+	private ResultActions putMenu(UUID id, Map<String, Object> body) throws Exception {
+		return mockMvc.perform(put("/admin/v1/menus/" + id)
+				.header("Authorization", "Bearer " + tokens.forUser("kc-admin"))
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(objectMapper.writeValueAsString(body)));
+	}
+
+	/** 400 VALIDATION_ERROR with exactly this message; the menu row is unchanged and no audit row is written. */
+	private void expectPutRejected(String key, Map<String, Object> body, String message) throws Exception {
+		UUID id = menuId(key);
+		Map<String, Object> rowBefore = jdbc.queryForMap("SELECT * FROM menus WHERE id = ?", id);
+
+		putMenu(id, body)
+				.andExpect(status().isBadRequest())
+				.andExpect(content().json(errorJson("VALIDATION_ERROR", message), JsonCompareMode.STRICT));
+		sendPendingWrites();
+
+		Map<String, Object> rowAfter = jdbc.queryForMap("SELECT * FROM menus WHERE id = ?", id);
+		Integer auditRows = jdbc.queryForObject("SELECT count(*) FROM audit_log", Integer.class);
+		assertThat(rowAfter).isEqualTo(rowBefore);
+		assertThat(auditRows).isZero();
+	}
+
+	/** The menu as it is now, as a complete PUT body; tests change fields from it. */
+	private Map<String, Object> currentBody(String key) {
+		Map<String, Object> row = jdbc.queryForMap("SELECT * FROM menus WHERE key = ?", key);
+		Map<String, Object> body = new LinkedHashMap<>();
+		body.put("key", row.get("key"));
+		body.put("label", row.get("label"));
+		body.put("path", row.get("path"));
+		body.put("icon", row.get("icon"));
+		body.put("type", row.get("type"));
+		if (row.get("parent_id") != null) {
+			body.put("parentId", row.get("parent_id").toString());
+		}
+		body.put("sortOrder", row.get("sort_order"));
+		body.put("isActive", row.get("is_active"));
+		return body;
+	}
+
+	private Timestamp updatedAt(UUID id) {
+		return jdbc.queryForObject("SELECT updated_at FROM menus WHERE id = ?", Timestamp.class, id);
+	}
+
+	private String errorJson(String code, String message) throws Exception {
+		return objectMapper.writeValueAsString(Map.of("error", Map.of("code", code, "message", message)));
 	}
 
 	/** 400 VALIDATION_ERROR with exactly this message, and nothing saved. */
