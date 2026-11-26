@@ -19,7 +19,7 @@ design; each part is marked with the sub-task that builds it and is confirmed th
 Ports used on your machine: **5434** (Postgres) and **8180** (Keycloak), bound to `127.0.0.1`
 only. They avoid 5433 and 8080, used by `extras/cce-local-setup`.
 
-From S1 on, the service itself uses **8085**. The optional local gateway (S13) uses **8095**,
+From S1 on, the service itself uses **8085**. The stand-in gateway (S6) and the optional real local gateway (S13) use **8095**,
 because 8090 is the local Protocol service.
 
 ## 2. Clone & Build
@@ -53,7 +53,8 @@ cce-admin-service/
 │   ├── keycloak/
 │   │   └── cce-realm-local.json  # Realm "cce", imported when Keycloak starts
 │   ├── create-superadmin.sh      # Creates the test user superadmin
-│   └── get-token.sh              # Prints a token for superadmin
+│   ├── get-token.sh              # Prints a token for superadmin
+│   └── FakeGateway.java          # Stand-in gateway for local demos (S6, §10.1)
 ├── docs/                         # This guide and the other design docs
 ├── build.gradle, settings.gradle          # Gradle build (S1)
 ├── gradlew, gradlew.bat, gradle/wrapper/  # Gradle wrapper, committed (S1)
@@ -263,11 +264,26 @@ What happens at startup:
 Until `superadmin` is linked, its valid token gets 403 `FORBIDDEN` — the service only accepts
 local ACTIVE users (B-12).
 
-### 10.1 Optional: the gateway locally (S13)
+### 10.1 Stand-in gateway (local demos)
 
 Without a gateway the service works, but every call that ends in a gateway sync (create / delete a
 role, save permissions, `/sync`) returns 502 `Gateway not reachable at http://localhost:8095` while
 keeping the DB change. That is expected.
+
+For a local demo, run the stand-in in its own terminal (Java 21 runs the single file directly):
+
+```bash
+java local/FakeGateway.java
+# Stand-in gateway on http://localhost:8095/api/permissions/sync-to-keycloak (Ctrl+C to stop)
+# 11:42:07  sync called → 200 success        ← one line per sync from the service
+```
+
+It answers every `POST /api/permissions/sync-to-keycloak` with `200 {"success": true, …}`, so creating
+and deleting roles answer 201 / 204. It **syncs nothing**: Keycloak gets no realm roles from it, so a
+user can't be created with a role made this way (S8); that needs the real gateway (§10.2). It is
+never used on a server, where `GATEWAY_BASE_URL` points at the real gateway.
+
+### 10.2 Optional: the real gateway locally (S13)
 
 To run the real sync and the real per-URL permission checks, run gateway-service **unchanged** on
 :8095 with environment variables only (S13):
@@ -352,7 +368,7 @@ Every acceptance criterion in SPEC §4 names the test that proves it.
 | `create-superadmin.sh` prints `Logging into …` and `Created new user with id …` | Info lines from Keycloak's `kcadm` tool, not errors |
 | Service won't start, error names `DB_URL`, `JWT_ISSUER` or `JWT_AUDIENCE` | Started without the `local` profile. Use `SPRING_PROFILES_ACTIVE=local` |
 | `superadmin`'s token gets 403 `FORBIDDEN` (planned, S2a / S3) | Not linked yet. Check the startup log for the bootstrap ERROR (`create superadmin in Keycloak first`, missing `SUPER_ADMIN` role, no email) and that `BOOTSTRAP_ADMIN_USERNAME` is set; fix, then restart the service. After a Keycloak reset, `superadmin` has a new id — reset the DB too |
-| Creating a role or saving permissions returns 502 `Gateway not reachable at http://localhost:8095` (planned, S6 / S11) | The local gateway isn't running. The DB change is saved; start the gateway (§10.1) and call `POST /admin/v1/roles/{id}/sync` |
+| Creating or deleting a role, or saving permissions, returns 502 `Gateway not reachable at http://localhost:8095` | No gateway on 8095. The DB change is saved. Start the stand-in (§10.1) or the real gateway (§10.2); then, for a role that exists, call `POST /admin/v1/roles/{id}/sync` (S11) |
 | Reset password returns 502 locally (planned, S10) | S0's Keycloak has no mail server. Expected locally; tests mock Keycloak |
 | Every call gets 401 `Missing or invalid token.` | No token, an expired one, one from another realm (`iss`), or one not meant for this service (`aud` without `cce-admin-service`). Get a fresh one with `get-token.sh`; the reason is in the DEBUG log of `JsonAuthEntryPoint` |
 | `./gradlew build` fails in `MigrationTest` | Docker isn't running; Testcontainers needs it |
