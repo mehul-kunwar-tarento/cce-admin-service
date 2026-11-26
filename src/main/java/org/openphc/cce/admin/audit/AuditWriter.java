@@ -1,13 +1,20 @@
 package org.openphc.cce.admin.audit;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.UUID;
 
 import org.openphc.cce.admin.entity.AuditLog;
 import org.openphc.cce.admin.repository.AuditLogRepository;
 import org.openphc.cce.admin.security.CurrentUser;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.context.request.RequestAttributes;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
@@ -17,9 +24,14 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import jakarta.servlet.http.HttpServletRequest;
 
-/** Writes the audit_log row for a change, as part of that change's transaction. */
+/**
+ * Writes audit_log rows: one per change, inside that change's transaction, and failure records in a
+ * transaction of their own.
+ */
 @Component
 public class AuditWriter {
+
+	private static final Logger log = LoggerFactory.getLogger(AuditWriter.class);
 
 	/** Actor name when there is no logged-in caller, e.g. at startup. */
 	public static final String SYSTEM = "SYSTEM";
@@ -29,10 +41,15 @@ public class AuditWriter {
 
 	private final AuditLogRepository repository;
 	private final ObjectMapper objectMapper;
+	private final TransactionTemplate newTransaction;
 
-	public AuditWriter(AuditLogRepository repository, ObjectMapper objectMapper) {
+	public AuditWriter(AuditLogRepository repository, ObjectMapper objectMapper,
+			PlatformTransactionManager transactionManager) {
 		this.repository = repository;
 		this.objectMapper = objectMapper;
+		// Failure records are written in a transaction of their own, so the caller's rollback can't remove them
+		this.newTransaction = new TransactionTemplate(transactionManager);
+		this.newTransaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
 	}
 
 	/**
@@ -41,6 +58,35 @@ public class AuditWriter {
 	 */
 	@Transactional(propagation = Propagation.MANDATORY)
 	public void record(AuditAction action, String entityType, String entityId, Object before, Object after) {
+		repository.save(newRow(action, entityType, entityId, before, after));
+	}
+
+	/**
+	 * Records a change that reached Keycloak but not our database (or the reverse), for an operator to fix.
+	 * Always logs an ERROR line first, then writes the row in its own transaction, so it survives the
+	 * caller's rollback. Never throws: the caller is already handling a failure, and the log line is the
+	 * record if the row can't be written (e.g. the database is down).
+	 */
+	public void recordFailure(AuditAction action, String entityType, String entityId, String keycloakId,
+			String failedStep, String error, String cleanup) {
+		log.error("{} {} {}: keycloakId={}, failedStep={}, error={}, cleanup={}", action, entityType, entityId,
+				keycloakId, failedStep, error, cleanup);
+		// The whole transaction, commit included, is inside the try: a commit error is caught here too
+		try {
+			Map<String, String> details = new LinkedHashMap<>();
+			details.put("keycloakId", keycloakId);
+			details.put("failedStep", failedStep);
+			details.put("error", error);
+			details.put("cleanup", cleanup);
+			AuditLog row = newRow(action, entityType, entityId, null, details);
+			newTransaction.executeWithoutResult(status -> repository.save(row));
+		} catch (RuntimeException e) {
+			log.error("Audit row for {} {} {} not written; the line above is the only record", action, entityType,
+					entityId, e);
+		}
+	}
+
+	private AuditLog newRow(AuditAction action, String entityType, String entityId, Object before, Object after) {
 		HttpServletRequest request = currentRequest();
 		CurrentUser actor = currentUser(request);
 
@@ -51,9 +97,8 @@ public class AuditWriter {
 			actorUsername = actor.username();
 		}
 
-		AuditLog row = new AuditLog(actorId, actorUsername, action, entityType, entityId, toJson(before),
-				toJson(after), ipAddress(request));
-		repository.save(row);
+		return new AuditLog(actorId, actorUsername, action, entityType, entityId, toJson(before), toJson(after),
+				ipAddress(request));
 	}
 
 	/** Null outside a request (at startup). */

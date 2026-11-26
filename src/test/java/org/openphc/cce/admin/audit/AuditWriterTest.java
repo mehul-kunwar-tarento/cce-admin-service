@@ -174,6 +174,45 @@ class AuditWriterTest {
 		assertThat(ipStoredFor(longestIpv6)).isEqualTo(longestIpv6);
 	}
 
+	// ---- failure records ----
+
+	@Test
+	void failureRowSurvivesTheMainRollback() {
+		transaction.executeWithoutResult(status -> {
+			auditWriter.recordFailure(AuditAction.USER_CREATE_FAILED, "USER", "asha", "kc-123", "save user",
+					"duplicate email", "keycloak user deleted");
+			// The change itself failed, so its transaction is rolled back
+			status.setRollbackOnly();
+		});
+
+		AuditAssert.exactlyOneRow(jdbc, AuditAction.USER_CREATE_FAILED, "asha");
+		Map<String, Object> row = jdbc.queryForMap("SELECT before, after ->> 'keycloakId' AS keycloak_id,"
+				+ " after ->> 'failedStep' AS failed_step, after ->> 'error' AS error,"
+				+ " after ->> 'cleanup' AS cleanup FROM audit_log");
+		assertThat(row.get("before")).isNull();
+		assertThat(row.get("keycloak_id")).isEqualTo("kc-123");
+		assertThat(row.get("failed_step")).isEqualTo("save user");
+		assertThat(row.get("error")).isEqualTo("duplicate email");
+		assertThat(row.get("cleanup")).isEqualTo("keycloak user deleted");
+	}
+
+	@Test
+	void failureRowHasActorAndIpLikeAnyRow() {
+		UUID aliceId = UUID.randomUUID();
+		MockHttpServletRequest request = requestFrom(new CurrentUser(aliceId, "alice", List.of("SUPER_ADMIN")));
+		request.addHeader("X-Forwarded-For", "1.2.3.4, 10.0.0.1");
+		startRequest(request);
+
+		auditWriter.recordFailure(AuditAction.USER_STATUS_UPDATE_FAILED, "USER", "user-1", "kc-1",
+				"disable in keycloak", "timeout", "none");
+
+		Map<String, Object> row = onlyRow();
+		assertThat(row.get("actor_id")).isEqualTo(aliceId);
+		assertThat(row.get("actor_username")).isEqualTo("alice");
+		assertThat(row.get("entity_type")).isEqualTo("USER");
+		assertThat(row.get("ip_address")).isEqualTo("1.2.3.4");
+	}
+
 	// ---- helpers ----
 
 	private MockHttpServletRequest requestFrom(CurrentUser user) {

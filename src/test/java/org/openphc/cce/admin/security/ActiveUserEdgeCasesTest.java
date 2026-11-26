@@ -33,6 +33,7 @@ import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
@@ -69,9 +70,13 @@ class ActiveUserEdgeCasesTest {
 	@MockitoBean
 	private UserRepository userRepository;
 
-	// No database here; the audit writer needs its repository to start, and these tests write no audit rows
+	// No database here; the audit writer needs its repository and a transaction manager to start, and these
+	// tests write no audit rows
 	@MockitoBean
 	private AuditLogRepository auditLogRepository;
+
+	@MockitoBean
+	private PlatformTransactionManager transactionManager;
 
 	@MockitoBean
 	private DatabaseCheck databaseCheck;
