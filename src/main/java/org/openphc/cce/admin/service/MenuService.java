@@ -10,20 +10,23 @@ import java.util.UUID;
 import org.hibernate.exception.ConstraintViolationException;
 import org.openphc.cce.admin.audit.AuditAction;
 import org.openphc.cce.admin.audit.AuditWriter;
+import org.openphc.cce.admin.dto.DeletedMenu;
 import org.openphc.cce.admin.dto.MenuRequest;
 import org.openphc.cce.admin.dto.MenuResponse;
 import org.openphc.cce.admin.dto.MenuSnapshot;
 import org.openphc.cce.admin.entity.Menu;
 import org.openphc.cce.admin.entity.MenuType;
+import org.openphc.cce.admin.entity.RoleMenu;
 import org.openphc.cce.admin.error.ApiException;
 import org.openphc.cce.admin.error.ErrorCode;
 import org.openphc.cce.admin.repository.MenuRepository;
+import org.openphc.cce.admin.repository.RoleMenuRepository;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-/** The menu catalog: read as a tree, create, change, and (later) delete. */
+/** The menu catalog: read as a tree, create, change and delete. */
 @Service
 public class MenuService {
 
@@ -32,10 +35,13 @@ public class MenuService {
 	private static final String KEY_CONSTRAINT = "uk_menus_key";
 
 	private final MenuRepository menuRepository;
+	private final RoleMenuRepository roleMenuRepository;
 	private final AuditWriter auditWriter;
 
-	public MenuService(MenuRepository menuRepository, AuditWriter auditWriter) {
+	public MenuService(MenuRepository menuRepository, RoleMenuRepository roleMenuRepository,
+			AuditWriter auditWriter) {
 		this.menuRepository = menuRepository;
+		this.roleMenuRepository = roleMenuRepository;
 		this.auditWriter = auditWriter;
 	}
 
@@ -140,6 +146,36 @@ public class MenuService {
 		menuRepository.saveAndFlush(menu);
 		auditWriter.record(AuditAction.MENU_UPDATED, ENTITY_TYPE, id.toString(), before, MenuSnapshot.of(menu));
 		return MenuResponse.from(menu);
+	}
+
+	/** Deletes a menu and its role links in one transaction. A NAV with DETAIL menus under it is refused. */
+	@Transactional
+	public void delete(UUID id) {
+		Optional<Menu> found = menuRepository.findById(id);
+		if (found.isEmpty()) {
+			throw notFound(id);
+		}
+		Menu menu = found.get();
+		// Only a NAV can have children, so this is the "NAV with DETAIL menus" case
+		if (menuRepository.existsByParentId(id)) {
+			throw invalid("'" + menu.getKey() + "' still has DETAIL menus under it. Delete or move its DETAIL menus"
+					+ " first. Nothing was deleted.");
+		}
+
+		List<RoleMenu> links = roleMenuRepository.findByMenuIdOrderByRoleId(id);
+		List<UUID> roleIds = new ArrayList<>();
+		for (RoleMenu link : links) {
+			roleIds.add(link.getRoleId());
+		}
+		DeletedMenu before = new DeletedMenu(MenuSnapshot.of(menu), roleIds);
+
+		// The links first: the database refuses to delete a menu that role_menus still points at
+		roleMenuRepository.deleteAll(links);
+		menuRepository.delete(menu);
+		// Delete now rather than at commit, so a database error surfaces here
+		menuRepository.flush();
+
+		auditWriter.record(AuditAction.MENU_DELETED, ENTITY_TYPE, id.toString(), before, null);
 	}
 
 	/** NAV has no parent; DETAIL has a parent that exists and is a NAV. */

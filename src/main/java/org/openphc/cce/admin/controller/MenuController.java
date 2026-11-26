@@ -8,6 +8,7 @@ import org.openphc.cce.admin.dto.MenuRequest;
 import org.openphc.cce.admin.dto.MenuResponse;
 import org.openphc.cce.admin.service.MenuService;
 import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -43,5 +44,11 @@ public class MenuController {
 	@PutMapping("/admin/v1/menus/{id}")
 	public ApiResponse<MenuResponse> update(@PathVariable UUID id, @Valid @RequestBody MenuRequest request) {
 		return ApiResponse.of(menuService.update(id, request));
+	}
+
+	@DeleteMapping("/admin/v1/menus/{id}")
+	@ResponseStatus(HttpStatus.NO_CONTENT)
+	public void delete(@PathVariable UUID id) {
+		menuService.delete(id);
 	}
 }

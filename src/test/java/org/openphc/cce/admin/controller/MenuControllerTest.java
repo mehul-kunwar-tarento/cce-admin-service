@@ -5,6 +5,7 @@ import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.hamcrest.Matchers.empty;
 import static org.hamcrest.Matchers.nullValue;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -13,7 +14,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.sql.Timestamp;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -530,6 +534,84 @@ class MenuControllerTest {
 						JsonCompareMode.STRICT));
 	}
 
+	// ---- DELETE /menus/{id} ----
+
+	@Test
+	void deletingADetailIs204WithItsLinksGone() throws Exception {
+		UUID patientDetailId = menuId("patient-detail");
+		UUID dashboardId = menuId("dashboard");
+		UUID roleA = insertRole("ROLE_A");
+		UUID roleB = insertRole("ROLE_B");
+		linkRoleToMenu(roleA, patientDetailId);
+		linkRoleToMenu(roleB, patientDetailId);
+		linkRoleToMenu(roleA, dashboardId);
+
+		deleteMenu(patientDetailId)
+				.andExpect(status().isNoContent())
+				.andExpect(content().string(""));
+		sendPendingWrites();
+
+		assertThat(count("SELECT count(*) FROM menus WHERE id = '" + patientDetailId + "'")).isZero();
+		assertThat(count("SELECT count(*) FROM role_menus WHERE menu_id = '" + patientDetailId + "'")).isZero();
+		assertThat(count("SELECT count(*) FROM role_menus WHERE menu_id = '" + dashboardId + "'"))
+				.as("other menus' links are untouched").isEqualTo(1);
+
+		AuditAssert.exactlyOneRow(jdbc, AuditAction.MENU_DELETED, patientDetailId.toString());
+		Map<String, Object> audit = jdbc.queryForMap("SELECT entity_type, before -> 'menu' ->> 'key' AS menu_key,"
+				+ " before -> 'roleIds' AS role_ids, after FROM audit_log WHERE entity_id = ?", patientDetailId.toString());
+		// Sorted as text, like Postgres; Java's UUID order is signed and puts 8-f before 0-7
+		List<String> expectedRoleIds = new ArrayList<>(List.of(roleA.toString(), roleB.toString()));
+		Collections.sort(expectedRoleIds);
+		assertThat(audit.get("entity_type")).isEqualTo("MENU");
+		assertThat(audit.get("menu_key")).isEqualTo("patient-detail");
+		assertThat(objectMapper.readTree(audit.get("role_ids").toString()))
+				.isEqualTo(objectMapper.valueToTree(expectedRoleIds));
+		assertThat(audit.get("after")).isNull();
+	}
+
+	@Test
+	void deletingAChildlessNavIs204() throws Exception {
+		UUID eventsId = menuId("events");
+
+		deleteMenu(eventsId).andExpect(status().isNoContent());
+		sendPendingWrites();
+
+		assertThat(count("SELECT count(*) FROM menus")).isEqualTo(11);
+		String roleIds = jdbc.queryForObject("SELECT before ->> 'roleIds' FROM audit_log WHERE entity_id = ?",
+				String.class, eventsId.toString());
+		assertThat(roleIds).isEqualTo("[]");
+	}
+
+	@Test
+	void deletingANavWithChildrenIs400() throws Exception {
+		deleteMenu(menuId("compliance"))
+				.andExpect(status().isBadRequest())
+				.andExpect(content().json(errorJson("VALIDATION_ERROR", "'compliance' still has DETAIL menus under it."
+						+ " Delete or move its DETAIL menus first. Nothing was deleted."), JsonCompareMode.STRICT));
+		sendPendingWrites();
+
+		assertThat(count("SELECT count(*) FROM menus")).isEqualTo(12);
+		assertThat(count("SELECT count(*) FROM audit_log")).isZero();
+	}
+
+	@Test
+	void deletingAnUnknownIdIs404() throws Exception {
+		deleteMenu(UUID.fromString("00000000-0000-0000-0000-000000000001"))
+				.andExpect(status().isNotFound())
+				.andExpect(content().json(errorJson("MENU_NOT_FOUND",
+						"No menu with id 00000000-0000-0000-0000-000000000001."), JsonCompareMode.STRICT));
+	}
+
+	@Test
+	void navCanBeDeletedOnceItsChildrenAreGone() throws Exception {
+		deleteMenu(menuId("patient-detail")).andExpect(status().isNoContent());
+		deleteMenu(menuId("patients")).andExpect(status().isNoContent());
+		sendPendingWrites();
+
+		assertThat(count("SELECT count(*) FROM menus")).isEqualTo(10);
+		assertThat(count("SELECT count(*) FROM audit_log WHERE action = 'MENU_DELETED'")).isEqualTo(2);
+	}
+
 	// ---- helpers ----
 
 	private ResultActions getMenus() throws Exception {
@@ -541,6 +623,24 @@ class MenuControllerTest {
 				.header("Authorization", "Bearer " + tokens.forUser("kc-admin"))
 				.contentType(MediaType.APPLICATION_JSON)
 				.content(objectMapper.writeValueAsString(body)));
+	}
+
+	private ResultActions deleteMenu(UUID id) throws Exception {
+		return mockMvc.perform(delete("/admin/v1/menus/" + id)
+				.header("Authorization", "Bearer " + tokens.forUser("kc-admin")));
+	}
+
+	private UUID insertRole(String name) {
+		return jdbc.queryForObject("INSERT INTO roles (name, display_name, is_system) VALUES (?, ?, false) RETURNING id",
+				UUID.class, name, name);
+	}
+
+	private void linkRoleToMenu(UUID roleId, UUID menuId) {
+		jdbc.update("INSERT INTO role_menus (role_id, menu_id) VALUES (?, ?)", roleId, menuId);
+	}
+
+	private int count(String sql) {
+		return jdbc.queryForObject(sql, Integer.class);
 	}
 
 	private ResultActions putMenu(UUID id, Map<String, Object> body) throws Exception {
