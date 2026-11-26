@@ -160,15 +160,15 @@ sequenceDiagram
         GW-->>GS: 206 {success:false, failedRoles:[A,B]}
         GS->>Log: WARN role id, URL, status, body
         GS-->>Svc: GatewaySyncException("Gateway reloaded its rules, but Keycloak role sync failed for: A, B.")
-    else 500 / other status
+    else any other reply (500, 404, 200 not success / not JSON)
         GW-->>GS: 500 {message:"X"}
         GS->>Log: WARN role id, URL, status, body
-        GS-->>Svc: GatewaySyncException("Gateway sync error: X.")
+        GS-->>Svc: GatewaySyncException("Gateway sync error: X.")<br/>(no message → "Gateway sync error: HTTP <status>.")
     else connection refused
-        GS->>Log: WARN role id, URL
+        GS->>Log: WARN role id, URL, status=none, body=none, error=could not connect
         GS-->>Svc: GatewaySyncException("Gateway not reachable at {url}.")
     else no reply in 10s
-        GS->>Log: WARN role id, URL
+        GS->>Log: WARN role id, URL, status=none, body=none, error=no answer within 10s
         GS-->>Svc: GatewaySyncException("Gateway did not answer within 10s.")
     end
 

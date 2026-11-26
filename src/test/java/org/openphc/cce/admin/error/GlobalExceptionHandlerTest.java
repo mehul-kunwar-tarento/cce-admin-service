@@ -24,10 +24,11 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.ResultMatcher;
 
-// The JWT and Keycloak settings must have values for the app to start, even with security filters off
+// The JWT, Keycloak and gateway settings must have values for the app to start, even with security filters off
 @WebMvcTest(controllers = { ErrorTestController.class, HealthController.class },
 		properties = { "JWT_ISSUER=http://test-keycloak/realms/cce", "JWT_AUDIENCE=cce-admin-service",
-		"KEYCLOAK_BASE_URL=http://test-keycloak", "KEYCLOAK_CLIENT_SECRET=test-secret" })
+				"KEYCLOAK_BASE_URL=http://test-keycloak", "KEYCLOAK_CLIENT_SECRET=test-secret",
+				"GATEWAY_BASE_URL=http://test-gateway" })
 // Security filters off: this test checks only error handling; security is tested in TokenCheckTest
 @AutoConfigureMockMvc(addFilters = false)
 @ExtendWith(OutputCaptureExtension.class)
@@ -95,6 +96,14 @@ class GlobalExceptionHandlerTest {
 		mockMvc.perform(get("/test/api-exception"))
 				.andExpect(status().isNotFound())
 				.andExpect(error("ROLE_NOT_FOUND", "x"))
+				.andExpect(noSpringDefaultKeys());
+	}
+
+	@Test
+	void gatewaySyncFailureNobodyCaughtIs502WithTheReason() throws Exception {
+		mockMvc.perform(get("/test/gateway-sync"))
+				.andExpect(status().isBadGateway())
+				.andExpect(error("KEYCLOAK_SYNC_FAILED", "Gateway not reachable at http://test-gateway."))
 				.andExpect(noSpringDefaultKeys());
 	}
 

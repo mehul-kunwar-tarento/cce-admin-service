@@ -16,3 +16,6 @@ JWT_AUDIENCE: cce-admin-service
 # The Keycloak in docker compose, and the user local/create-superadmin.sh makes
 KEYCLOAK_BASE_URL: http://localhost:8180
 BOOTSTRAP_ADMIN_USERNAME: superadmin
+
+# The local gateway (S13 runs it on 8095; 8090 is the local Protocol service)
+GATEWAY_BASE_URL: http://localhost:8095

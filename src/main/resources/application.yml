@@ -49,6 +49,9 @@ cce:
     client-id: ${KEYCLOAK_CLIENT_ID:cce-admin-service}
     # This service's own login to the Keycloak Admin API; from the environment, never written in a file
     client-secret: ${KEYCLOAK_CLIENT_SECRET}
+  gateway:
+    # The gateway's address; required, the localhost value lives only in application-local.yml
+    base-url: ${GATEWAY_BASE_URL}
   bootstrap:
     # Keycloak user linked as the first admin on startup; unset = do nothing
     admin-username: ${BOOTSTRAP_ADMIN_USERNAME:}

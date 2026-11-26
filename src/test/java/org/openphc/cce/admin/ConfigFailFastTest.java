@@ -7,22 +7,23 @@ import org.openphc.cce.admin.config.RequiredSettingsCheck;
 import org.springframework.boot.SpringApplication;
 
 /**
- * Outside the local profile, a missing DB_URL, JWT or Keycloak setting stops startup instead of
+ * Outside the local profile, a missing DB_URL, JWT, Keycloak or gateway setting stops startup instead of
  * silently pointing at localhost.
  */
 class ConfigFailFastTest {
 
 	private static final String KEYCLOAK_BASE_URL = "--KEYCLOAK_BASE_URL=http://kc";
 	private static final String KEYCLOAK_CLIENT_SECRET = "--KEYCLOAK_CLIENT_SECRET=s";
+	private static final String GATEWAY_BASE_URL = "--GATEWAY_BASE_URL=http://gw";
 
 	@Test
-	void startupWithNothingSetNamesAllSevenVariables() {
+	void startupWithNothingSetNamesAllEightVariables() {
 		SpringApplication app = appWithCheck();
 
 		// port 0 = any free port, so the test never clashes with a running service
 		assertThatThrownBy(() -> app.run("--server.port=0"))
 				.hasMessageContaining("Missing required setting(s): DB_URL, DB_USERNAME, DB_PASSWORD, JWT_ISSUER,"
-						+ " JWT_AUDIENCE, KEYCLOAK_BASE_URL, KEYCLOAK_CLIENT_SECRET.");
+						+ " JWT_AUDIENCE, KEYCLOAK_BASE_URL, KEYCLOAK_CLIENT_SECRET, GATEWAY_BASE_URL.");
 	}
 
 	@Test
@@ -32,7 +33,7 @@ class ConfigFailFastTest {
 		// DB_URL set but empty, as a deploy leaves it when the value was forgotten
 		assertThatThrownBy(() -> app.run("--server.port=0", "--DB_URL=", "--DB_USERNAME=u", "--DB_PASSWORD=p",
 				"--JWT_ISSUER=http://kc/realms/cce", "--JWT_AUDIENCE=cce-admin-service", KEYCLOAK_BASE_URL,
-				KEYCLOAK_CLIENT_SECRET))
+				KEYCLOAK_CLIENT_SECRET, GATEWAY_BASE_URL))
 				.hasMessageContaining("Missing required setting(s): DB_URL.");
 	}
 
@@ -41,7 +42,7 @@ class ConfigFailFastTest {
 		SpringApplication app = appWithCheck();
 
 		assertThatThrownBy(() -> app.run("--server.port=0", "--DB_URL=jdbc:postgresql://db/x", "--DB_USERNAME=u",
-				"--DB_PASSWORD=p", "--JWT_AUDIENCE=cce-admin-service", KEYCLOAK_BASE_URL, KEYCLOAK_CLIENT_SECRET))
+				"--DB_PASSWORD=p", "--JWT_AUDIENCE=cce-admin-service", KEYCLOAK_BASE_URL, KEYCLOAK_CLIENT_SECRET, GATEWAY_BASE_URL))
 				.hasMessageContaining("Missing required setting(s): JWT_ISSUER.");
 	}
 
@@ -50,7 +51,7 @@ class ConfigFailFastTest {
 		SpringApplication app = appWithCheck();
 
 		assertThatThrownBy(() -> app.run("--server.port=0", "--DB_URL=jdbc:postgresql://db/x", "--DB_USERNAME=u",
-				"--DB_PASSWORD=p", "--JWT_ISSUER=http://kc/realms/cce", KEYCLOAK_BASE_URL, KEYCLOAK_CLIENT_SECRET))
+				"--DB_PASSWORD=p", "--JWT_ISSUER=http://kc/realms/cce", KEYCLOAK_BASE_URL, KEYCLOAK_CLIENT_SECRET, GATEWAY_BASE_URL))
 				.hasMessageContaining("Missing required setting(s): JWT_AUDIENCE.");
 	}
 
@@ -60,7 +61,7 @@ class ConfigFailFastTest {
 
 		assertThatThrownBy(() -> app.run("--server.port=0", "--DB_URL=jdbc:postgresql://db/x", "--DB_USERNAME=u",
 				"--DB_PASSWORD=p", "--JWT_ISSUER=http://kc/realms/cce", "--JWT_AUDIENCE=cce-admin-service",
-				KEYCLOAK_CLIENT_SECRET))
+				KEYCLOAK_CLIENT_SECRET, GATEWAY_BASE_URL))
 				.hasMessageContaining("Missing required setting(s): KEYCLOAK_BASE_URL.");
 	}
 
@@ -70,8 +71,18 @@ class ConfigFailFastTest {
 
 		assertThatThrownBy(() -> app.run("--server.port=0", "--DB_URL=jdbc:postgresql://db/x", "--DB_USERNAME=u",
 				"--DB_PASSWORD=p", "--JWT_ISSUER=http://kc/realms/cce", "--JWT_AUDIENCE=cce-admin-service",
-				KEYCLOAK_BASE_URL))
+				KEYCLOAK_BASE_URL, GATEWAY_BASE_URL))
 				.hasMessageContaining("Missing required setting(s): KEYCLOAK_CLIENT_SECRET.");
+	}
+
+	@Test
+	void missingGatewayBaseUrlIsNamed() {
+		SpringApplication app = appWithCheck();
+
+		assertThatThrownBy(() -> app.run("--server.port=0", "--DB_URL=jdbc:postgresql://db/x", "--DB_USERNAME=u",
+				"--DB_PASSWORD=p", "--JWT_ISSUER=http://kc/realms/cce", "--JWT_AUDIENCE=cce-admin-service",
+				KEYCLOAK_BASE_URL, KEYCLOAK_CLIENT_SECRET))
+				.hasMessageContaining("Missing required setting(s): GATEWAY_BASE_URL.");
 	}
 
 	private SpringApplication appWithCheck() {
