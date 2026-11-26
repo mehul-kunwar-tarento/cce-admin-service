@@ -8,6 +8,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import org.junit.jupiter.api.Test;
 import org.openphc.cce.admin.health.DatabaseCheck;
 import org.openphc.cce.admin.repository.AuditLogRepository;
+import org.openphc.cce.admin.repository.MenuRepository;
+import org.openphc.cce.admin.repository.RoleMenuRepository;
 import org.openphc.cce.admin.repository.UserRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -43,6 +45,12 @@ class OpenApiTest {
 
 	@MockitoBean
 	private AuditLogRepository auditLogRepository;
+
+	@MockitoBean
+	private MenuRepository menuRepository;
+
+	@MockitoBean
+	private RoleMenuRepository roleMenuRepository;
 
 	@MockitoBean
 	private PlatformTransactionManager transactionManager;
