@@ -178,6 +178,7 @@ org/openphc/cce/admin/
 ├── error/                                         # Errors
 │   ├── ErrorCode.java                             #   PRD Appendix B codes + D12 codes (S1); USERNAME_IN_USE (S8)
 │   ├── ApiException.java                          #   (status, code, message) thrown on purpose (S1)
+│   ├── ConstraintViolations.java                  #   Which DB constraint refused a row, for races → 409 (S6)
 │   ├── ErrorResponse.java                         #   {error:{code,message}} (S1)
 │   ├── ErrorResponseWriter.java                   #   Writes that body from code that runs before any controller (S3)
 │   └── GlobalExceptionHandler.java                #   @RestControllerAdvice: D12 mapping, reference id on 500 (S1);
@@ -208,14 +209,18 @@ org/openphc/cce/admin/
 │   ├── AuditLog.java                              #   @Immutable: Hibernate never updates a saved row (S4)
 │   ├── Menu.java, MenuType.java                   #   parentId is a plain UUID, no JPA relation (S5)
 │   ├── RoleMenu.java, RoleMenuId.java             #   Two-column key (role_id, menu_id) via @IdClass (S5)
-│   └── Role.java, ApiPermission.java, UserRole.java   # ApiPermission.id is Long (S6, D1)
+│   ├── Role.java                                  #   (S6)
+│   ├── ApiPermission.java                         #   Long id from the database, LocalDateTime times, as the gateway's table (S6, D1, D2)
+│   └── UserRole.java, UserRoleId.java             #   Two-column key (user_id, role_id) via @IdClass (S6)
 │
 ├── repository/                                    # Spring Data JPA
 │   ├── UserRepository.java                        #   findByKeycloakId, moveLastLoginForward (S3); existsByUsername, addRole (S2a)
 │   ├── AuditLogRepository.java                    #   bare Repository: save, findById, findAll, count; no update/delete (S4)
 │   ├── MenuRepository.java                        #   findAllByOrderBySortOrderAscKeyAsc, existsByKey, existsByParentId (S5)
-│   ├── RoleMenuRepository.java                    #   findByMenuIdOrderByRoleId (S5)
-│   └── …Role / ApiPermission / UserRole repositories  # (names confirmed in S6)
+│   ├── RoleMenuRepository.java                    #   findByMenuIdOrderByRoleId (S5); findByRoleId, findMenuKeysOfRole (S6)
+│   ├── RoleRepository.java                        #   existsByName (S6)
+│   ├── ApiPermissionRepository.java               #   existsByPermissionName, findByPermissionNameOrderById (S6)
+│   └── UserRoleRepository.java                    #   existsByRoleId (S6)
 │
 ├── client/                                        # Everything that leaves the service
 │   ├── KeycloakClient.java                        #   Interface: findUserByUsername, hasRealmRole (S2a); createUser, assignRealmRoles, deleteUser (S8);
@@ -247,7 +252,7 @@ org/openphc/cce/admin/
 │
 ├── service/                                       # The rules: order, diffs, guards, transactions
 │   ├── MenuService.java                           #   (S5)
-│   ├── RoleService.java                           #   (S6)
+│   ├── RoleService.java                           #   create / delete: TransactionTemplate, commit, then gateway sync (S6)
 │   ├── RoleMenuService.java                       #   (S7)
 │   ├── UserCreateService.java                     #   (S8)
 │   ├── UserQueryService.java, UserUpdateService.java  # (S9)
@@ -259,6 +264,7 @@ org/openphc/cce/admin/
     ├── MenuRequest, MenuResponse                  #   (S5)
     ├── MenuSnapshot, DeletedMenu                  #   Audit before/after of a menu (S5)
     ├── CreateRoleRequest, UpdateRoleRequest, RoleResponse   # (S6)
+    ├── RoleSnapshot, PermissionSnapshot, CreatedRole, DeletedRole  # Audit before/after of a role (S6)
     ├── RoleMenusRequest, RoleMenusResponse        #   (S7)
     ├── CreateUserRequest                          #   (S8)
     ├── UserResponse, UpdateUserRequest            #   (S9)

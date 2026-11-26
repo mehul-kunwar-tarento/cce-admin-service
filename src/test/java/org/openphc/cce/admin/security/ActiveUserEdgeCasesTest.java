@@ -22,10 +22,13 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.openphc.cce.admin.entity.User;
 import org.openphc.cce.admin.entity.UserStatus;
 import org.openphc.cce.admin.health.DatabaseCheck;
+import org.openphc.cce.admin.repository.ApiPermissionRepository;
 import org.openphc.cce.admin.repository.AuditLogRepository;
 import org.openphc.cce.admin.repository.MenuRepository;
 import org.openphc.cce.admin.repository.RoleMenuRepository;
+import org.openphc.cce.admin.repository.RoleRepository;
 import org.openphc.cce.admin.repository.UserRepository;
+import org.openphc.cce.admin.repository.UserRoleRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -38,6 +41,8 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+
+import jakarta.persistence.EntityManager;
 
 /**
  * Cases a real database can't easily show: roles read from another claim path, and the database
@@ -87,7 +92,20 @@ class ActiveUserEdgeCasesTest {
 	private RoleMenuRepository roleMenuRepository;
 
 	@MockitoBean
+	private RoleRepository roleRepository;
+
+	@MockitoBean
+	private ApiPermissionRepository apiPermissionRepository;
+
+	@MockitoBean
+	private UserRoleRepository userRoleRepository;
+
+	@MockitoBean
 	private PlatformTransactionManager transactionManager;
+
+	// RoleService reads rows back through it; nothing here creates a role
+	@MockitoBean
+	private EntityManager entityManager;
 
 	@MockitoBean
 	private DatabaseCheck databaseCheck;

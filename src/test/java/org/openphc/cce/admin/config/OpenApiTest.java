@@ -7,16 +7,21 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import org.junit.jupiter.api.Test;
 import org.openphc.cce.admin.health.DatabaseCheck;
+import org.openphc.cce.admin.repository.ApiPermissionRepository;
 import org.openphc.cce.admin.repository.AuditLogRepository;
 import org.openphc.cce.admin.repository.MenuRepository;
 import org.openphc.cce.admin.repository.RoleMenuRepository;
+import org.openphc.cce.admin.repository.RoleRepository;
 import org.openphc.cce.admin.repository.UserRepository;
+import org.openphc.cce.admin.repository.UserRoleRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.test.web.servlet.MockMvc;
+
+import jakarta.persistence.EntityManager;
 
 /**
  * The whole app without a database, so Swagger is checked as it really runs, security included:
@@ -53,7 +58,20 @@ class OpenApiTest {
 	private RoleMenuRepository roleMenuRepository;
 
 	@MockitoBean
+	private RoleRepository roleRepository;
+
+	@MockitoBean
+	private ApiPermissionRepository apiPermissionRepository;
+
+	@MockitoBean
+	private UserRoleRepository userRoleRepository;
+
+	@MockitoBean
 	private PlatformTransactionManager transactionManager;
+
+	// RoleService reads rows back through it; nothing here creates a role
+	@MockitoBean
+	private EntityManager entityManager;
 
 	@Test
 	void apiDocsHaveOurTitleAndListHealth() throws Exception {

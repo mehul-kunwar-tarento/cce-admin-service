@@ -1,6 +1,7 @@
 package org.openphc.cce.admin.entity;
 
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.UUID;
 
 import jakarta.persistence.Column;
@@ -66,7 +67,8 @@ public class Menu {
 		this.parentId = parentId;
 		this.sortOrder = sortOrder;
 		this.isActive = isActive;
-		this.updatedAt = Instant.now();
+		// The database keeps microseconds; rounding here makes the reply show the value that is stored
+		this.updatedAt = Instant.now().truncatedTo(ChronoUnit.MICROS);
 	}
 
 	public UUID getId() {

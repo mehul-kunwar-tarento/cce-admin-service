@@ -7,7 +7,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
-import org.hibernate.exception.ConstraintViolationException;
 import org.openphc.cce.admin.audit.AuditAction;
 import org.openphc.cce.admin.audit.AuditWriter;
 import org.openphc.cce.admin.dto.DeletedMenu;
@@ -18,6 +17,7 @@ import org.openphc.cce.admin.entity.Menu;
 import org.openphc.cce.admin.entity.MenuType;
 import org.openphc.cce.admin.entity.RoleMenu;
 import org.openphc.cce.admin.error.ApiException;
+import org.openphc.cce.admin.error.ConstraintViolations;
 import org.openphc.cce.admin.error.ErrorCode;
 import org.openphc.cce.admin.repository.MenuRepository;
 import org.openphc.cce.admin.repository.RoleMenuRepository;
@@ -91,7 +91,7 @@ public class MenuService {
 			menuRepository.saveAndFlush(menu);
 		} catch (DataIntegrityViolationException e) {
 			// Another request created the same key between the check above and this insert
-			if (violates(e, KEY_CONSTRAINT)) {
+			if (ConstraintViolations.isViolationOf(e, KEY_CONSTRAINT)) {
 				throw duplicateKey(request.key());
 			}
 			throw e;
@@ -214,15 +214,6 @@ public class MenuService {
 			return true;
 		}
 		return isActive;
-	}
-
-	/** Whether the database refused the row because of this constraint (and not some other one). */
-	private boolean violates(DataIntegrityViolationException e, String constraintName) {
-		if (!(e.getCause() instanceof ConstraintViolationException)) {
-			return false;
-		}
-		ConstraintViolationException violation = (ConstraintViolationException) e.getCause();
-		return constraintName.equals(violation.getConstraintName());
 	}
 
 	private ApiException notFound(UUID id) {

@@ -145,7 +145,7 @@ delete method (S4).
 | `actor_id` | UUID | Yes | — | `users.id` of the caller; null for `SYSTEM` |
 | `actor_username` | VARCHAR(255) | No | — | Caller's username, or `SYSTEM` at startup (D5) |
 | `action` | VARCHAR(50) | No | — | §9.2 |
-| `entity_type` | VARCHAR(50) | No | — | `USER` (S2a), `MENU` (S5); `ROLE` confirmed in S6 |
+| `entity_type` | VARCHAR(50) | No | — | `USER` (S2a), `MENU` (S5), `ROLE` (S6) |
 | `entity_id` | VARCHAR(64) | No | — | Id of the changed row (string, so it can hold any id) |
 | `before` | JSONB | Yes | — | State before; null on create |
 | `after` | JSONB | Yes | — | State after; null on delete. Failure details for `*_FAILED` (§9.3) |
@@ -316,10 +316,12 @@ DTO names confirmed in S10.
 
 | Field | Create | Update | Rule |
 |-------|--------|--------|------|
-| `name` | Required | Optional | Create: §3 pattern, unused as role name and as `permission_name`. Update: must equal the current name (D9) |
-| `displayName` | Required | (confirmed in S6) | |
-| `description` | Optional | Optional | |
+| `name` | Required | Optional | Create: §3 pattern, max 100, unused as role name and as `permission_name`. Update: must equal the current name (D9) |
+| `displayName` | Required | Required | Not blank, max 255 |
+| `description` | Optional | Optional | No limit; blank = none. Update: left out = none |
 | `isSystem` | Ignored | Ignored | Created roles are always `is_system = false` |
+
+`PUT` sends the complete editable part; the same values as now write nothing and no audit row.
 
 ### 4.5 RoleMenusRequest — `PUT /roles/{id}/menus` (S7)
 
@@ -409,7 +411,7 @@ do **not** use these token roles; they read `user_roles` (S12).
 |-------|--------|----------|
 | `UserResponse` | `id`, `username`, `email`, `firstName`, `lastName`, `status`, `roles` (`[{id, name, displayName}]`), `facilityScope`, `lastLoginAt`, `createdAt` | S9 rule d |
 | Create-user 201 body | `id`, `username`, `email`, `status`, `roles` | S8 |
-| `RoleResponse` | (confirmed in S6) | S6 |
+| `RoleResponse` | `id`, `name`, `displayName`, `description`, `isSystem`, `createdAt`, `updatedAt` | S6 |
 | `MenuResponse` | `id`, `key`, `label`, `path`, `icon`, `type`, `parentId`, `sortOrder`, `isActive`, `children` (List\<MenuResponse\>; `[]` for a DETAIL and in the `POST`/`PUT` reply) | S5 |
 | `RoleMenusResponse` | `menus` (`[{id, key, label, type, parentId}]`), `warnings` (List\<String\>) | S7 |
 | `PermissionRow` | `id` (Long), `httpMethod`, `uriPattern`, `description`, `resourceCategory` | S11 |
@@ -577,9 +579,9 @@ Realm roles themselves are created and deleted by the gateway's sync, never by t
 | `MENU_CREATED` | `POST /menus` (S5) | null | the menu: `id`, `key`, `label`, `path`, `icon`, `type`, `parentId`, `sortOrder`, `isActive` |
 | `MENU_UPDATED` | `PUT /menus/{id}` (S5); not written when nothing changed | the menu (as above) | the menu (as above) |
 | `MENU_DELETED` | `DELETE /menus/{id}` (S5) | `{menu: <as above>, roleIds: [ids of the roles that had it, sorted]}` | null |
-| `ROLE_CREATED` | `POST /roles` (S6) | null | confirmed in S6 |
-| `ROLE_UPDATED` | `PUT /roles/{id}` (S6) | the role | the role |
-| `ROLE_DELETED` | `DELETE /roles/{id}` (S6) | the role + its menus + its permissions | null |
+| `ROLE_CREATED` | `POST /roles` (S6) | null | `{role: <the role>, permissions: [the GET /admin/v1/me/menus row]}`; the role = `id`, `name`, `displayName`, `description`, `isSystem`; a row = `id`, `httpMethod`, `uriPattern`, `description`, `resourceCategory` |
+| `ROLE_UPDATED` | `PUT /roles/{id}` (S6); not written when nothing changed | the role (as above) | the role (as above) |
+| `ROLE_DELETED` | `DELETE /roles/{id}` (S6) | `{role, menus: [menu keys, A–Z], permissions: [its rows]}` | null |
 | `ROLE_MENUS_UPDATED` | `PUT /roles/{id}/menus` (S7) | menu keys | menu keys |
 | `ROLE_PERMISSIONS_UPDATED` | `PUT /roles/{id}/permissions` (S11) | the rows | the rows (shows what was added and removed) |
 | `USER_CREATED` | `POST /users` (S8) | null | confirmed in S8 |
