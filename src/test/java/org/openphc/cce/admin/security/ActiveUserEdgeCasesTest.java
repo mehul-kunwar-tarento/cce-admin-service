@@ -22,6 +22,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.openphc.cce.admin.entity.User;
 import org.openphc.cce.admin.entity.UserStatus;
 import org.openphc.cce.admin.health.DatabaseCheck;
+import org.openphc.cce.admin.repository.AuditLogRepository;
 import org.openphc.cce.admin.repository.UserRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -67,6 +68,10 @@ class ActiveUserEdgeCasesTest {
 
 	@MockitoBean
 	private UserRepository userRepository;
+
+	// No database here; the audit writer needs its repository to start, and these tests write no audit rows
+	@MockitoBean
+	private AuditLogRepository auditLogRepository;
 
 	@MockitoBean
 	private DatabaseCheck databaseCheck;
