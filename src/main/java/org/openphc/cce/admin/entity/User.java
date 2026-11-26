@@ -43,6 +43,17 @@ public class User {
 	protected User() {
 	}
 
+	/** A new user, not saved yet. */
+	public User(String keycloakId, String username, String email, String firstName, String lastName,
+			UserStatus status) {
+		this.keycloakId = keycloakId;
+		this.username = username;
+		this.email = email;
+		this.firstName = firstName;
+		this.lastName = lastName;
+		this.status = status;
+	}
+
 	public UUID getId() {
 		return id;
 	}
