@@ -100,7 +100,7 @@ has today; later rows are planned. Versions not written here come from the Sprin
 | `spring-boot-testcontainers`, `org.testcontainers:junit-jupiter` + `postgresql` (1.21.4) | Throwaway Postgres for the migration tests. Pinned to 1.21.4 (`ext['testcontainers.version']`): Spring Boot 3.5.6's 1.21.3 is rejected by Docker 29 | S2 |
 | `spring-boot-starter-oauth2-resource-server` | JWT validation via JWKS: signature, `iss`, `aud`, `exp` | S3 |
 | `org.keycloak:keycloak-admin-client` 26.0.13 | Keycloak Admin API (the 26.0 line is made for Keycloak 26 servers) | S2a |
-| WireMock | Fake gateway in tests | S6a |
+| `org.wiremock:wiremock-standalone` 3.13.2 (test only) | Fake gateway in tests | S6a |
 
 
 ## 5. Settings (`.env`)
@@ -332,7 +332,7 @@ minutes, then repeat (S2a).
 |------|-----|----------|
 | Service-layer tests | `KeycloakClient` and `GatewaySyncClient` mocked, so "Keycloak worked, DB failed" can be tested without a real Keycloak (PRD §9 "Testability") | S2a onwards |
 | Migration tests | `MigrationTest` runs Flyway on a Testcontainers Postgres; `MigrationOverGatewayTableTest` loads the gateway's seed first, then migrates twice — **Docker must be running** | S2 |
-| Gateway client test | WireMock plays the gateway: 200 / 206 / 500 / refused / timeout | S6a |
+| Gateway client test | `HttpGatewaySyncClientTest`: WireMock plays the gateway: 200 / 200 not JSON / 206 / 500 / 404 / refused / timeout | S6a |
 | Audit assertion | `AuditAssert.exactlyOneRow(jdbc, action, entityId)`: every mutating endpoint has a test that asserts exactly one `audit_log` row (B-50) | S4 onwards |
 | Error-handler / security tests | Test-only controllers under `src/test` | S1, S3 |
 | End-to-end scenarios | `local/scenarios/s1.sh` … `s6.sh`: curl through the local gateway, PASS / FAIL per check | S13 |

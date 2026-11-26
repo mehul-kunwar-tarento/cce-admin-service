@@ -491,9 +491,11 @@ Keycloak being down does not (D5).
 
 | Env var | Default | Local value | Required outside local | Sub-task |
 |---------|---------|-------------|------------------------|----------|
-| `GATEWAY_BASE_URL` | — | `http://localhost:8095` | Yes | S6a |
+| `GATEWAY_BASE_URL` | — | `http://localhost:8095` (in `application-local.yml`) | Yes | S6a |
 
-Timeout: 10s (fixed, D3).
+Timeout: 10s to connect and 10s to answer (fixed, D3; `HttpGatewaySyncClient.TIMEOUT`). A missing
+`GATEWAY_BASE_URL` stops startup, naming it (`RequiredSettingsCheck`); the gateway being down does
+not (each sync that needs it answers 502).
 
 ### 7.6 Bootstrap admin
 
@@ -620,7 +622,7 @@ Fields the log lines carry:
 | Log line | Fields |
 |----------|--------|
 | ERROR on a 500 (D12) | `ref` = 8-character reference id (also in the response `message`), method + path, full exception |
-| WARN on a gateway sync failure (D3) | role id, URL called, gateway status, full gateway response body |
+| WARN on a gateway sync failure (D3) | `Gateway sync failed for role <id>: POST <url> → status=<status>, body=<full body>`; when the gateway never answered: `status=none, body=none, error=could not connect` or `error=no answer within 10s` |
 | ERROR on a half-done Keycloak/DB change (D8) | Written by `AuditWriter.recordFailure`: `<action> <entityType> <entityId>: keycloakId=…, failedStep=…, error=…, cleanup=…`; if the audit row can't be written, a second line `Audit row for <action> <entityType> <entityId> not written; the line above is the only record` with the exception |
 
 Metrics and MDC fields are **not in v1**. The log format is Spring Boot's default console format,

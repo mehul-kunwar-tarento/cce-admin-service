@@ -193,7 +193,7 @@ org/openphc/cce/admin/
 │   ├── OpenApiConfig.java                         #   Swagger UI + /v3/api-docs, title "CCE Admin Service API" v1 (S1); Bearer JWT scheme → Authorize button (S2a)
 │   ├── SecurityConfig.java                        #   Stateless; open paths; token check, then ActiveUserFilter (S3)
 │   ├── KeycloakProperties.java                    #   cce.keycloak.*: KEYCLOAK_BASE_URL, _REALM, _CLIENT_ID, _CLIENT_SECRET (S2a)
-│   └── GatewayProperties.java                     #   GATEWAY_BASE_URL (S6a)
+│   └── GatewayProperties.java                     #   cce.gateway.base-url = GATEWAY_BASE_URL, required at startup (S6a)
 │
 ├── security/                                      # Per-request identity
 │   ├── JsonAuthEntryPoint.java                    #   401 in the B-03 shape (S3); signature, iss, aud, exp are checked by Spring Boot
@@ -221,8 +221,8 @@ org/openphc/cce/admin/
 │   ├── KeycloakException.java                     #   Any Keycloak failure; message names the URL, the step and the cause (S2a)
 │   ├── KeycloakUser.java                          #   id, username, email, firstName, lastName (S2a)
 │   ├── GatewaySyncClient.java                     #   Interface: sync(roleId) (S6a)
-│   ├── HttpGatewaySyncClient.java                 #   RestClient, no auth header, 10s timeout (S6a)
-│   └── GatewaySyncException.java                  #   Reason text → 502 KEYCLOAK_SYNC_FAILED (S6a)
+│   ├── HttpGatewaySyncClient.java                 #   RestClient on Java's HttpClient, no auth header, 10s connect / answer, never resent (S6a)
+│   └── GatewaySyncException.java                  #   Reason text; callers add their opening; uncaught → 502 KEYCLOAK_SYNC_FAILED (S6a)
 │
 ├── bootstrap/                                     # First admin (D5)
 │   ├── BootstrapAdminRunner.java                  #   ApplicationRunner: lowercased username, Keycloak lookup, ERROR + keep running on any failure (S2a)
@@ -297,8 +297,8 @@ src/test/
     ├── security/ActiveUserCheckTest.java          # 403 cases, CurrentUser, last_login_at on real Postgres (S3)
     ├── security/ActiveUserEdgeCasesTest.java      # Client-roles path; DB failure → 500; failed login update → 200 (S3)
     ├── security/RolesClaimReaderTest.java, LastLoginRecorderTest.java  # Unit tests (S3)
-    └── …                                          # Service tests with KeycloakClient and gateway mocked;
-                                                   # WireMock as the fake gateway (S6a)
+    ├── client/HttpGatewaySyncClientTest.java      # WireMock as the fake gateway: every reply, timeout, no auth, one request, WARN (S6a)
+    └── …                                          # Service tests with KeycloakClient and GatewaySyncClient mocked
 ```
 
 ## 7. Request Processing Pipeline

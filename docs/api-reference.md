@@ -964,22 +964,37 @@ POST {GATEWAY_BASE_URL}/api/permissions/sync-to-keycloak
 ```
 
 - **No `Authorization` header** — the gateway's endpoint has no auth (D3).
-- 10s timeout; called **once**, never retried.
+- 10s to connect and 10s to answer; called **once**, never retried (Java's own HTTP client, which never
+  resends a POST by itself).
 - Global: the gateway reads all `api_permissions` rows, reloads its rules, then creates realm roles
   for every `permission_name` and deletes realm roles with no rows (D4).
 - `GATEWAY_BASE_URL` local default `http://localhost:8095` (D3).
 
 | Gateway reply | Result |
 |---------------|--------|
-| 200 + `success: true` | Success |
-| 200 + `success: false`, or a 200 body that is not JSON | Failure (reason text confirmed in S6a) |
-| 206 + `success: false` + `failedRoles` | Failure — rules already reloaded, some Keycloak roles failed |
-| 500 + `message` | Failure |
-| Any other status | Failure |
-| Connection refused / no reply in 10s | Failure |
+| Gateway reply | Reason (`GatewaySyncException` message) |
+|---------------|--------|
+| 200 + `success: true` | Success, no log |
+| 206 + `failedRoles` | `Gateway reloaded its rules, but Keycloak role sync failed for: A, B.` (rules already reloaded) |
+| Any other reply with a `message` (e.g. 500, or 200 + `success: false`) | `Gateway sync error: <message>.` |
+| Any other reply without one (e.g. 404, a 200 that is not JSON) | `Gateway sync error: HTTP <status>.` |
+| Connection refused | `Gateway not reachable at <GATEWAY_BASE_URL>.` |
+| No reply in 10s | `Gateway did not answer within 10s.` |
 
-Every failure → one WARN log with role id, URL, status and the full gateway response body, then
-502 to the caller (§5.4).
+Today's gateway sends 200 only with `success: true` (otherwise 206 or 500); a 200 that is not JSON
+means something else answered, e.g. a wrong `GATEWAY_BASE_URL`.
+
+Every failure → one WARN line, then 502 to the caller (§5.4), whose message starts with the
+caller's own opening:
+
+```
+Gateway sync failed for role <id>: POST <url> → status=206, body=<full body>
+Gateway sync failed for role <id>: POST <url> → status=none, body=none, error=could not connect
+Gateway sync failed for role <id>: POST <url> → status=none, body=none, error=no answer within 10s
+```
+
+A `GatewaySyncException` that a caller does not turn into its own message still becomes 502
+`KEYCLOAK_SYNC_FAILED` with the reason alone (`GlobalExceptionHandler`).
 
 ### 6.2 Keycloak Admin API
 
