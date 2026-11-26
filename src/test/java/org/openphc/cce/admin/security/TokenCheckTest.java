@@ -42,6 +42,8 @@ class TokenCheckTest {
 	static void jwtSettings(DynamicPropertyRegistry registry) {
 		registry.add("JWT_ISSUER", () -> TestTokens.ISSUER);
 		registry.add("JWT_AUDIENCE", () -> TestTokens.AUDIENCE);
+		registry.add("KEYCLOAK_BASE_URL", () -> "http://test-keycloak");
+		registry.add("KEYCLOAK_CLIENT_SECRET", () -> "test-secret");
 		registry.add("JWT_JWK_SET_URI", tokens::jwkSetUri);
 	}
 

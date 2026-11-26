@@ -25,7 +25,8 @@ import org.springframework.test.web.servlet.MockMvc;
 				+ "org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration,"
 				+ "org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration",
 		"JWT_ISSUER=http://test-keycloak/realms/cce",
-		"JWT_AUDIENCE=cce-admin-service" })
+		"JWT_AUDIENCE=cce-admin-service",
+		"KEYCLOAK_BASE_URL=http://test-keycloak", "KEYCLOAK_CLIENT_SECRET=test-secret" })
 @AutoConfigureMockMvc
 class OpenApiTest {
 
