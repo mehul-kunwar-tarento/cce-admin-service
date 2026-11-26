@@ -1,26 +1,38 @@
 package org.openphc.cce.admin.controller;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.nullValue;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.openphc.cce.admin.audit.AuditAction;
+import org.openphc.cce.admin.audit.AuditAssert;
+import org.openphc.cce.admin.client.GatewaySyncClient;
 import org.openphc.cce.admin.security.TestTokens;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.json.JsonCompareMode;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
@@ -30,6 +42,8 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+
+import jakarta.persistence.EntityManager;
 
 /**
  * /admin/v1/roles called the way a client calls it: a signed token, an ACTIVE local user, the real
@@ -70,6 +84,13 @@ class RoleControllerTest {
 
 	@Autowired
 	private ObjectMapper objectMapper;
+
+	@Autowired
+	private EntityManager entityManager;
+
+	// No gateway in tests; each test says what the sync does, and checks whether it was called
+	@MockitoBean
+	private GatewaySyncClient gatewaySyncClient;
 
 	@BeforeEach
 	void insertAdmin() {
@@ -170,10 +191,158 @@ class RoleControllerTest {
 						JsonCompareMode.STRICT));
 	}
 
+	// ---- POST /roles: accepted ----
+
+	@Test
+	void createIs201WithOnePermissionRowAndOneAuditRow() throws Exception {
+		String body = postRole(role("FACILITY_ADMIN"))
+				.andExpect(status().isCreated())
+				.andExpect(jsonPath("$.data.name").value("FACILITY_ADMIN"))
+				.andExpect(jsonPath("$.data.displayName").value("Facility admin"))
+				.andExpect(jsonPath("$.data.description").value("Runs one facility"))
+				.andExpect(jsonPath("$.data.isSystem").value(false))
+				.andExpect(jsonPath("$.data.createdAt").isNotEmpty())
+				.andExpect(jsonPath("$.data.updatedAt").isNotEmpty())
+				.andReturn().getResponse().getContentAsString();
+		UUID id = UUID.fromString(objectMapper.readTree(body).path("data").path("id").asText());
+		sendPendingWrites();
+
+		List<Map<String, Object>> rows = jdbc.queryForList("SELECT http_method, uri_pattern FROM api_permissions"
+				+ " WHERE permission_name = 'FACILITY_ADMIN'");
+		assertThat(rows).hasSize(1);
+		assertThat(rows.get(0).get("http_method")).isEqualTo("GET");
+		assertThat(rows.get(0).get("uri_pattern")).isEqualTo("/admin/v1/me/menus");
+
+		AuditAssert.exactlyOneRow(jdbc, AuditAction.ROLE_CREATED, id.toString());
+		Map<String, Object> audit = jdbc.queryForMap("SELECT entity_type, before, after -> 'role' ->> 'name' AS role_name,"
+				+ " after -> 'role' ->> 'isSystem' AS is_system, after -> 'permissions' -> 0 ->> 'uriPattern' AS uri"
+				+ " FROM audit_log WHERE entity_id = ?", id.toString());
+		assertThat(audit.get("entity_type")).isEqualTo("ROLE");
+		assertThat(audit.get("before")).isNull();
+		assertThat(audit.get("role_name")).isEqualTo("FACILITY_ADMIN");
+		assertThat(audit.get("is_system")).isEqualTo("false");
+		assertThat(audit.get("uri")).isEqualTo("/admin/v1/me/menus");
+
+		verify(gatewaySyncClient, times(1)).sync(id);
+	}
+
+	@Test
+	void isSystemInTheBodyIsIgnored() throws Exception {
+		Map<String, Object> body = role("FACILITY_ADMIN");
+		body.put("isSystem", true);
+
+		postRole(body)
+				.andExpect(status().isCreated())
+				.andExpect(jsonPath("$.data.isSystem").value(false));
+		Boolean isSystem = jdbc.queryForObject("SELECT is_system FROM roles WHERE name = 'FACILITY_ADMIN'", Boolean.class);
+		assertThat(isSystem).isFalse();
+	}
+
+	@Test
+	void blankDescriptionIsStoredAsNone() throws Exception {
+		Map<String, Object> body = role("FACILITY_ADMIN");
+		body.put("description", "   ");
+
+		postRole(body)
+				.andExpect(status().isCreated())
+				.andExpect(jsonPath("$.data.description").value(nullValue()));
+	}
+
+	// ---- POST /roles: rejected, nothing saved and no sync ----
+
+	@Test
+	void lowercaseNameIs400() throws Exception {
+		expectCreateRejected(400, role("facility_admin"), "VALIDATION_ERROR",
+				"Invalid request: name must be UPPER_SNAKE_CASE, starting with a letter (e.g. FACILITY_ADMIN).");
+	}
+
+	@Test
+	void missingDisplayNameIs400() throws Exception {
+		Map<String, Object> body = role("FACILITY_ADMIN");
+		body.remove("displayName");
+		expectCreateRejected(400, body, "VALIDATION_ERROR", "Invalid request: displayName must not be blank.");
+	}
+
+	@Test
+	void blankDisplayNameIs400() throws Exception {
+		Map<String, Object> body = role("FACILITY_ADMIN");
+		body.put("displayName", "   ");
+		expectCreateRejected(400, body, "VALIDATION_ERROR", "Invalid request: displayName must not be blank.");
+	}
+
+	@Test
+	void tooLongNameIs400() throws Exception {
+		expectCreateRejected(400, role("A".repeat(101)), "VALIDATION_ERROR",
+				"Invalid request: name size must be between 0 and 100.");
+	}
+
+	@Test
+	void tooLongDisplayNameIs400() throws Exception {
+		Map<String, Object> body = role("FACILITY_ADMIN");
+		body.put("displayName", "x".repeat(256));
+		expectCreateRejected(400, body, "VALIDATION_ERROR", "Invalid request: displayName size must be between 0 and 255.");
+	}
+
+	@Test
+	void existingRoleNameIs409() throws Exception {
+		expectCreateRejected(409, role("SUPER_ADMIN"), "DUPLICATE_ROLE_NAME",
+				"A role named 'SUPER_ADMIN' already exists.");
+	}
+
+	@Test
+	void nameUsedByAPermissionSetIs409() throws Exception {
+		jdbc.update("INSERT INTO api_permissions (permission_name, http_method, uri_pattern)"
+				+ " VALUES ('COLLECTOR_EVENTS_WRITE', 'POST', '/collector/v1/events')");
+
+		expectCreateRejected(409, role("COLLECTOR_EVENTS_WRITE"), "DUPLICATE_ROLE_NAME",
+				"This name is already used by an existing permission set in the gateway. Choose another name.");
+	}
+
 	// ---- helpers ----
 
 	private ResultActions getRoles(String rest) throws Exception {
 		return mockMvc.perform(get("/admin/v1/roles" + rest).header("Authorization", "Bearer " + tokens.forUser("kc-admin")));
+	}
+
+	private ResultActions postRole(Map<String, Object> body) throws Exception {
+		return mockMvc.perform(post("/admin/v1/roles")
+				.header("Authorization", "Bearer " + tokens.forUser("kc-admin"))
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(objectMapper.writeValueAsString(body)));
+	}
+
+	/** The given error, and nothing saved: still only SUPER_ADMIN, its rows, no audit row, no sync. */
+	private void expectCreateRejected(int status, Map<String, Object> body, String code, String message)
+			throws Exception {
+		int permissionsBefore = count("SELECT count(*) FROM api_permissions");
+
+		postRole(body)
+				.andExpect(status().is(status))
+				.andExpect(content().json(errorJson(code, message), JsonCompareMode.STRICT));
+		sendPendingWrites();
+
+		assertThat(count("SELECT count(*) FROM roles")).isEqualTo(1);
+		assertThat(count("SELECT count(*) FROM api_permissions")).isEqualTo(permissionsBefore);
+		assertThat(count("SELECT count(*) FROM audit_log")).isZero();
+		verifyNoInteractions(gatewaySyncClient);
+	}
+
+	/** A valid create body; tests change or remove fields from it. */
+	private Map<String, Object> role(String name) {
+		Map<String, Object> body = new LinkedHashMap<>();
+		body.put("name", name);
+		body.put("displayName", "Facility admin");
+		body.put("description", "Runs one facility");
+		return body;
+	}
+
+	/** The test's transaction never commits, so plain SQL sees Hibernate's queued writes only after a flush. */
+	private void sendPendingWrites() {
+		entityManager.flush();
+	}
+
+	private int count(String sql) {
+		return jdbc.queryForObject(sql, Integer.class);
 	}
 
 	private UUID insertRole(String name) {

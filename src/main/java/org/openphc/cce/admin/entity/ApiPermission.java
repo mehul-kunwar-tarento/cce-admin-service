@@ -38,6 +38,16 @@ public class ApiPermission {
 	protected ApiPermission() {
 	}
 
+	/** A new permission row, not saved yet. */
+	public ApiPermission(String permissionName, String httpMethod, String uriPattern, String description,
+			String resourceCategory) {
+		this.permissionName = permissionName;
+		this.httpMethod = httpMethod;
+		this.uriPattern = uriPattern;
+		this.description = description;
+		this.resourceCategory = resourceCategory;
+	}
+
 	public Long getId() {
 		return id;
 	}

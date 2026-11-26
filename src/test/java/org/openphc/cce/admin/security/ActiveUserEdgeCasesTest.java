@@ -42,6 +42,8 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
+import jakarta.persistence.EntityManager;
+
 /**
  * Cases a real database can't easily show: roles read from another claim path, and the database
  * failing during the user lookup or the login-time update. The app runs without a database; the repository is a stand-in.
@@ -100,6 +102,10 @@ class ActiveUserEdgeCasesTest {
 
 	@MockitoBean
 	private PlatformTransactionManager transactionManager;
+
+	// RoleService reads rows back through it; nothing here creates a role
+	@MockitoBean
+	private EntityManager entityManager;
 
 	@MockitoBean
 	private DatabaseCheck databaseCheck;

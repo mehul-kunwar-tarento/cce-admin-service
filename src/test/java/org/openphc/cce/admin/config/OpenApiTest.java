@@ -21,6 +21,8 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.test.web.servlet.MockMvc;
 
+import jakarta.persistence.EntityManager;
+
 /**
  * The whole app without a database, so Swagger is checked as it really runs, security included:
  * the docs open without a token.
@@ -66,6 +68,10 @@ class OpenApiTest {
 
 	@MockitoBean
 	private PlatformTransactionManager transactionManager;
+
+	// RoleService reads rows back through it; nothing here creates a role
+	@MockitoBean
+	private EntityManager entityManager;
 
 	@Test
 	void apiDocsHaveOurTitleAndListHealth() throws Exception {

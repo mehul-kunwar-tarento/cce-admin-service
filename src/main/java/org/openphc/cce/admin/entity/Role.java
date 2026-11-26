@@ -34,6 +34,14 @@ public class Role {
 	protected Role() {
 	}
 
+	/** A new role, not saved yet. Never a system role: those come only from the seed. */
+	public Role(String name, String displayName, String description) {
+		this.name = name;
+		this.displayName = displayName;
+		this.description = description;
+		this.isSystem = false;
+	}
+
 	public UUID getId() {
 		return id;
 	}
