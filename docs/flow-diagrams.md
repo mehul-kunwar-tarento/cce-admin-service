@@ -129,9 +129,10 @@ flowchart TD
     style E502C fill:#ffebee
 ```
 
-Each Keycloak call is made at most once; nothing is retried (B-32). `recordFailure` writes in its
-own transaction, so the audit row survives the rollback; if even that fails, the ERROR log is the
-record (S4).
+Each Keycloak call is made at most once; nothing is retried (B-32). `recordFailure` always logs an ERROR
+line, then writes the audit row in its own transaction, so the row survives the rollback; if even
+that fails (insert or commit), it logs a second ERROR line and never throws, so the first line is
+the record (S4).
 
 ## 4. Gateway Sync Handling
 
