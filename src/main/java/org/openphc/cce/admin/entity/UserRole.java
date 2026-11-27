@@ -28,6 +28,12 @@ public class UserRole {
 	protected UserRole() {
 	}
 
+	/** A new link, not saved yet. */
+	public UserRole(UUID userId, UUID roleId) {
+		this.userId = userId;
+		this.roleId = roleId;
+	}
+
 	public UUID getUserId() {
 		return userId;
 	}

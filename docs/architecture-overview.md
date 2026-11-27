@@ -225,8 +225,11 @@ org/openphc/cce/admin/
 ├── client/                                        # Everything that leaves the service
 │   ├── KeycloakClient.java                        #   Interface: findUserByUsername, hasRealmRole (S2a); createUser, assignRealmRoles, deleteUser (S8);
 │   │                                              #   updateUser (S9); setEnabled/removeRealmRoles/sendUpdatePasswordEmail (S10)
-│   ├── KeycloakAdminClient.java                   #   Implementation on keycloak-admin-client, client_credentials, 10s connect / answer (S2a)
-│   ├── KeycloakException.java                     #   Any Keycloak failure; message names the URL, the step and the cause (S2a)
+│   ├── KeycloakAdminClient.java                   #   Implementation on keycloak-admin-client, client_credentials, 10s connect / answer (S2a);
+│   │                                              #   the library's own JacksonProvider, so no empty fields are sent to Keycloak 26.5 (S8)
+│   ├── KeycloakException.java                     #   Any Keycloak failure; message names the URL, the step and the cause (S2a); getReason() = cause only (S8)
+│   ├── KeycloakConflictException.java             #   Create: Keycloak already has the username or email (409) (S8)
+│   ├── KeycloakRejectedException.java             #   Create: Keycloak refused a value, reason per field (400) (S8)
 │   ├── KeycloakUser.java                          #   id, username, email, firstName, lastName (S2a)
 │   ├── GatewaySyncClient.java                     #   Interface: sync(roleId) (S6a)
 │   ├── HttpGatewaySyncClient.java                 #   RestClient on Java's HttpClient, no auth header, 10s connect / answer, never resent (S6a)
@@ -254,7 +257,7 @@ org/openphc/cce/admin/
 │   ├── MenuService.java                           #   (S5)
 │   ├── RoleService.java                           #   create / delete: TransactionTemplate, commit, then gateway sync (S6)
 │   ├── RoleMenuService.java                       #   Locks the role, checks, saves only the difference, warnings (S7)
-│   ├── UserCreateService.java                     #   (S8)
+│   ├── UserCreateService.java                     #   Checks, Keycloak create + assign, short TransactionTemplate save; undo once on failure (S8)
 │   ├── UserQueryService.java, UserUpdateService.java  # (S9)
 │   ├── UserStatusService.java, UserRolesService.java, PasswordResetService.java  # (S10)
 │   ├── RolePermissionService.java                 #   (S11)
@@ -267,7 +270,8 @@ org/openphc/cce/admin/
     ├── RoleSnapshot, PermissionSnapshot, CreatedRole, DeletedRole  # Audit before/after of a role (S6)
     ├── RoleMenusRequest, RoleMenusResponse, RoleMenuItem  # (S7)
     ├── RoleMenusSnapshot                          #   Audit before/after of a role's menus: {menus: keys A–Z} (S7)
-    ├── CreateUserRequest                          #   (S8)
+    ├── CreateUserRequest, CreatedUserResponse, UserRoleItem  # (S8); the request trims and lowercases username and email
+    ├── UserSnapshot                               #   Audit after of USER_CREATED: the user + role names A–Z (S8)
     ├── UserResponse, UpdateUserRequest            #   (S9)
     ├── PermissionRow, RolePermissionsRequest      #   (S11)
     └── MeResponse, MenuNode                       #   (S12)
@@ -309,6 +313,10 @@ src/test/
     ├── security/ActiveUserEdgeCasesTest.java      # Client-roles path; DB failure → 500; failed login update → 200 (S3)
     ├── security/RolesClaimReaderTest.java, LastLoginRecorderTest.java  # Unit tests (S3)
     ├── client/HttpGatewaySyncClientTest.java      # WireMock as the fake gateway: every reply, timeout, no auth, one request, WARN (S6a)
+    ├── client/KeycloakAdminClientUsersTest.java   # WireMock as Keycloak: create 201/409/400/500, assign from available roles, delete (S8)
+    ├── dto/CreateUserRequestTest.java             # Trim + lowercase, limits, roleIds rules, password ignored (S8)
+    ├── controller/UserCreateControllerTest.java   # 400 / 409 before Keycloak; happy path, order, audit, roles A–Z (S8)
+    ├── controller/UserCreateFailureTest.java      # Real commits: Keycloak 409/400/down; assign or save fails → undo, USER_CREATE_FAILED (S8)
     └── …                                          # Service tests with KeycloakClient and GatewaySyncClient mocked
 ```
 

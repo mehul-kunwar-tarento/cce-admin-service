@@ -97,7 +97,7 @@ sequenceDiagram
 
 ```mermaid
 flowchart TD
-    A["POST /users"] --> B{"Body valid?<br/>username, email, firstName,<br/>lastName, roleIds ≥ 1"}
+    A["POST /users<br/>username, email trimmed + lowercased"] --> B{"Body valid?<br/>username, email, firstName,<br/>lastName, roleIds ≥ 1"}
     B -->|No| E400["400 VALIDATION_ERROR<br/>Keycloak not called"]
     B -->|Yes| C{"Roles exist?<br/>email / username free in users?"}
     C -->|"unknown roleId"| E400
@@ -106,17 +106,18 @@ flowchart TD
     C -->|Yes| K1["Keycloak: create account<br/>enabled, UPDATE_PASSWORD,<br/>no credentials"]
 
     K1 -->|"Keycloak 409"| E409K["409 EMAIL_IN_USE<br/>'Keycloak already has an account…'<br/>nothing created"]
-    K1 -->|"down / 500"| E502A["502 KEYCLOAK_SYNC_FAILED<br/>'User was not created…'<br/>nothing created, no audit"]
-    K1 -->|OK| K2["Keycloak: assign realm roles"]
+    K1 -->|"Keycloak 400"| E400K["400 VALIDATION_ERROR<br/>'Keycloak refused the user: …'<br/>nothing created"]
+    K1 -->|"down / 500"| E502A["502 KEYCLOAK_SYNC_FAILED<br/>'User was not created…'<br/>nothing created, no audit, WARN"]
+    K1 -->|OK| K2["Keycloak: assign realm roles<br/>(picked from the user's available roles)"]
 
-    K2 -->|fails| U["Undo once:<br/>Keycloak delete user"]
+    K2 -->|"fails, e.g. no realm role NURSE"| U["Undo once:<br/>Keycloak delete user"]
     K2 -->|OK| D["DB transaction:<br/>users + user_roles + audit USER_CREATED"]
-    D -->|fails| U
+    D -->|"fails (rolled back)"| U
     D -->|OK| OK["201 Created<br/>{id, username, email, status, roles}"]
 
-    U -->|deleted| R1["recordFailure USER_CREATE_FAILED<br/>cleanup: keycloak user deleted<br/>+ ERROR log"]
-    U -->|"delete failed"| R2["recordFailure USER_CREATE_FAILED<br/>cleanup: FAILED — delete keycloak user by hand<br/>+ ERROR log"]
-    R1 --> E502B["502 'it has been removed again.<br/>Nothing was changed. Try again.'"]
+    U -->|"deleted (404 counts)"| R1["recordFailure USER_CREATE_FAILED<br/>entity_id = username<br/>cleanup: keycloak user deleted<br/>+ ERROR log"]
+    U -->|"delete failed"| R2["recordFailure USER_CREATE_FAILED<br/>entity_id = username<br/>cleanup: FAILED — delete keycloak user by hand<br/>+ ERROR log"]
+    R1 --> E502B["502 'assigning its realm roles failed: reason'<br/>or 'saving the user failed'<br/>'it has been removed again…'"]
     R2 --> E502C["502 'could not be removed.<br/>An operator must delete it…'"]
 
     style OK fill:#e8f5e9
@@ -125,6 +126,7 @@ flowchart TD
     style E409E fill:#ffebee
     style E409U fill:#ffebee
     style E409K fill:#ffebee
+    style E400K fill:#ffebee
     style E502A fill:#ffebee
     style E502C fill:#ffebee
 ```

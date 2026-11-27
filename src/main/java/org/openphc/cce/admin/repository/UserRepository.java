@@ -18,6 +18,10 @@ public interface UserRepository extends JpaRepository<User, UUID> {
 
 	boolean existsByUsername(String username);
 
+	/** Whether any user has this email, in any case. */
+	@Query("SELECT COUNT(u) > 0 FROM User u WHERE lower(u.email) = lower(:email)")
+	boolean existsByEmailInAnyCase(@Param("email") String email);
+
 	/** Gives the user a role by its name. Returns how many rows were added (0 = no role with that name). */
 	@Modifying
 	@Query(value = "INSERT INTO user_roles (user_id, role_id) SELECT :userId, id FROM roles WHERE name = :roleName",
