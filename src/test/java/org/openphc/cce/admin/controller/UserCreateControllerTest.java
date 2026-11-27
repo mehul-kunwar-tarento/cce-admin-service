@@ -139,6 +139,18 @@ class UserCreateControllerTest {
 				"VALIDATION_ERROR", "Invalid request: roleIds[1] must not be null.");
 	}
 
+	@Test
+	void tooShortUsernameIsRefused() throws Exception {
+		expectRefused(body(" ab ", "ab@example.org", "Alice", "Otieno", "[\"" + nurse + "\"]"), 400,
+				"VALIDATION_ERROR", "Invalid request: username size must be between 3 and 255.");
+	}
+
+	@Test
+	void tooLongNameIsRefused() throws Exception {
+		expectRefused(body("alice", "alice@example.org", "a".repeat(256), "Otieno", "[\"" + nurse + "\"]"), 400,
+				"VALIDATION_ERROR", "Invalid request: firstName size must be between 0 and 255.");
+	}
+
 	// ---- the checks in our database ----
 
 	@Test
@@ -214,6 +226,22 @@ class UserCreateControllerTest {
 		JSONAssert.assertEquals(expected, after, true);
 		assertThat(jdbc.queryForObject("SELECT before IS NULL FROM audit_log WHERE action = 'USER_CREATED'"
 				+ " AND entity_id = ?", Boolean.class, id)).isTrue();
+	}
+
+	@Test
+	void usernameAndEmailAreStoredLowercase() throws Exception {
+		keycloakCreatesTheAccount();
+
+		String reply = postUser(body(" Alice ", " ALICE@Example.ORG ", "Alice", "Otieno", "[\"" + nurse + "\"]"))
+				.andExpect(status().isCreated())
+				.andExpect(jsonPath("$.data.username").value("alice"))
+				.andExpect(jsonPath("$.data.email").value("alice@example.org"))
+				.andReturn().getResponse().getContentAsString();
+
+		verify(keycloakClient).createUser("alice", "alice@example.org", "Alice", "Otieno");
+		entityManager.flush();
+		assertThat(jdbc.queryForMap("SELECT username, email FROM users WHERE id = ?::uuid", jsonId(reply)))
+				.containsEntry("username", "alice").containsEntry("email", "alice@example.org");
 	}
 
 	@Test

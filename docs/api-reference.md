@@ -274,12 +274,12 @@ Create a user: Keycloak account, realm roles and local row in one call (B-31, S8
 
 | Field | Type | Required | Rule |
 |-------|------|----------|------|
-| `username` | string | Yes | Unique; can never change afterwards |
-| `email` | string | Yes | Valid email; unique case-insensitively |
-| `firstName` | string | Yes | Not blank |
-| `lastName` | string | Yes | Not blank |
+| `username` | string | Yes | Trimmed and lowercased (as Keycloak stores it), then 3–255 characters; unique; can never change afterwards |
+| `email` | string | Yes | Trimmed and lowercased; valid email; max 255; unique case-insensitively |
+| `firstName` | string | Yes | Not blank; max 255; capitals kept |
+| `lastName` | string | Yes | Not blank; max 255; capitals kept |
 | `facilityScope` | string | No | Stored only, not enforced (PRD) |
-| `roleIds` | UUID[] | Yes | At least one; every id must exist |
+| `roleIds` | UUID[] | Yes | At least one; no `null` item; every id must exist; the same id twice counts once. System roles (e.g. `SUPER_ADMIN`) can be given like any other |
 
 `firstName` and `lastName` are required because Keycloak 26's default user profile needs them for
 login; without them the user would be created but could not log in (S8 rule g).
@@ -302,15 +302,20 @@ link with reset password (S8 rule a, B-36). A new user is always `ACTIVE`.
 
 | Status | Code | When |
 |--------|------|------|
-| 201 | — | Created. Body: `{id, username, email, status:"ACTIVE", roles}` |
-| 400 | `VALIDATION_ERROR` | Missing or blank username, email, firstName or lastName; bad email; `roleIds: []`; unknown `roleId` |
-| 409 | `EMAIL_IN_USE` | Email already in `users` (any case) |
-| 409 | `USERNAME_IN_USE` | Username already in `users` |
-| 409 | `EMAIL_IN_USE` | Keycloak already has an account with this username or email (S8 rule c message, §5.3) |
-| 502 | `KEYCLOAK_SYNC_FAILED` | Keycloak could not create the account — nothing changed (§5.4) |
-| 502 | `KEYCLOAK_SYNC_FAILED` | A step after Keycloak create failed — undo attempted, `USER_CREATE_FAILED` recorded (§5.4) |
+| 201 | — | Created. Body: `{id, username, email, status:"ACTIVE", roles}`, `roles` = `[{id, name, displayName}]` A→Z by name |
+| 400 | `VALIDATION_ERROR` | Missing or blank username, email, firstName or lastName; too short / too long; bad email; `roleIds: []` or a `null` in it; unknown `roleId` (all named) — Keycloak not called |
+| 409 | `EMAIL_IN_USE` | Email already in `users` (any case) — checked before the username; Keycloak not called |
+| 409 | `USERNAME_IN_USE` | Username already in `users` — Keycloak not called |
+| 400 | `VALIDATION_ERROR` | Keycloak refused a value (its user-profile rules, e.g. `<` in a name) — nothing created, no audit |
+| 409 | `EMAIL_IN_USE` | Keycloak already has an account with this username or email (S8 rule c message, §5.3) — nothing created, no audit |
+| 502 | `KEYCLOAK_SYNC_FAILED` | Keycloak could not create the account — nothing changed, no audit, WARN log (§5.4) |
+| 502 | `KEYCLOAK_SYNC_FAILED` | Assigning the realm roles or saving the user failed — the Keycloak account is deleted once, `USER_CREATE_FAILED` recorded (§5.4) |
 
 Each Keycloak call is made at most once per request; nothing is retried (B-32).
+
+Known edge, accepted: two admins creating the same username or email at the same moment both
+pass the checks; Keycloak lets only the first through, so the second gets the rule c 409, whose
+text says the account is unknown to this service.
 
 #### GET /users/{id}
 
@@ -844,7 +849,7 @@ curl -s -X POST http://localhost:8085/admin/v1/users \
 }
 ```
 
-`roles` element shape as in `GET /users`; confirmed in S8. Alice gets no password; send her the
+`roles` are sorted by name, each `{id, name, displayName}` as in `GET /users`. Alice gets no password; send her the
 link with `POST /users/{id}/reset-password`.
 
 **A step after Keycloak create failed, account removed again (`HTTP 502`):**
@@ -922,6 +927,10 @@ exception text, SQL, stack trace, host or class name is ever put in `message`.
 | Role rename (D9) | `Role name cannot be changed (it is used in Keycloak and the gateway). Only displayName and description can be edited. To use a different name, create a new role. Nothing was changed.` |
 | Name used by a gateway permission set (D11, 409) | `This name is already used by an existing permission set in the gateway. Choose another name.` |
 | Keycloak already has the account (S8 rule c, 409 `EMAIL_IN_USE`) | `Keycloak already has an account with this username or email that this service doesn't know. An operator must remove or link it.` |
+| Keycloak refused a value of a new user (S8, 400 `VALIDATION_ERROR`) | `Keycloak refused the user: <field> <Keycloak error>. Nothing was created.` — e.g. `username error-invalid-length`; several fields joined by `; ` |
+| Unknown role ids in `POST /users` (400) | `Unknown role id(s): <id>, <id>. Nothing was created.` — each once, sorted as text |
+| Email taken (409 `EMAIL_IN_USE`, `POST /users`) | `Email <email> is already used by another user.` |
+| Username taken (409 `USERNAME_IN_USE`) | `Username <username> is already taken.` |
 | Reset password for a non-ACTIVE user (S10 rule g) | `Activate the user first.` |
 | Unknown role id (404 `ROLE_NOT_FOUND`) | `No role with id <id>.` |
 | Role name taken (409 `DUPLICATE_ROLE_NAME`) | `A role named '<NAME>' already exists.` |
@@ -970,7 +979,8 @@ The message always says what **was** saved, so the caller knows what to retry.
 | Case | `message` |
 |------|-----------|
 | Create user, Keycloak could not create the account | `User was not created. Keycloak could not create the account: <reason>. Nothing was changed. Try again.` |
-| Create user, later step failed, undo worked | `User was not created. The Keycloak account was created but saving the user failed; it has been removed again. Nothing was changed. Try again.` |
+| Create user, assigning the realm roles failed, undo worked | `User was not created. The Keycloak account was created but assigning its realm roles failed: <reason>; it has been removed again. Nothing was changed.` — e.g. `Keycloak has no realm role NURSE` |
+| Create user, saving the user failed, undo worked | `User was not created. The Keycloak account was created but saving the user failed; it has been removed again. Nothing was changed. Try again.` (no database detail; that is in the ERROR log) |
 | Create user, later step failed, undo failed | `User was not created. The Keycloak account <keycloakId> was created but could not be removed. An operator must delete it in Keycloak before retrying with the same username/email.` |
 | Update profile, Keycloak failed | `Profile not changed. Keycloak error: <reason>. Nothing was changed.` |
 | Update profile, commit failed after Keycloak | `Profile only partly applied: Keycloak has the new values, the user record does not. An operator must fix it.` |
@@ -1065,15 +1075,21 @@ Each method is called at most once per request.
 |--------|--------------------------|----------|---------|
 | `findUserByUsername(username)` | Exact-match username search (`GET /admin/realms/cce/users?username=…&exact=true`, tested in S0) | S2a | Bootstrap admin |
 | `hasRealmRole(keycloakId, roleName)` | Checks effective realm roles (composite / group roles count) | S2a | Bootstrap admin |
-| `createUser(…)` | Creates an enabled account with required action `UPDATE_PASSWORD`, no credentials | S8 | `POST /users` |
-| `assignRealmRoles(keycloakId, names)` | Adds realm-role mappings | S8 | `POST /users`, `PUT /users/{id}/roles` |
-| `deleteUser(keycloakId)` | Deletes the account (create-user undo only) | S8 | `POST /users` |
+| `createUser(…)` | Creates an enabled account with required action `UPDATE_PASSWORD`, no credentials. `POST …/users` → 201, id = last part of `Location`; 409 → `KeycloakConflictException`; 400 → `KeycloakRejectedException` with `<field> <errorMessage>` per field | S8 | `POST /users` |
+| `assignRealmRoles(keycloakId, names)` | `GET …/users/{id}/role-mappings/realm/available`, picks the roles by name (a missing one → `Keycloak has no realm role <NAME>`, nothing given), then one `POST …/users/{id}/role-mappings/realm`. The service account may not read a role by name (403), but may list a user's available roles | S8 | `POST /users`, `PUT /users/{id}/roles` |
+| `deleteUser(keycloakId)` | `DELETE …/users/{id}` → 204; 404 counts as deleted (create-user undo only) | S8 | `POST /users` |
 | `updateUser(keycloakId, email, firstName, lastName)` | Updates profile fields | S9 | `PUT /users/{id}` |
 | `setEnabled(keycloakId, enabled)` | Enables / disables the account | S10 | `PATCH /users/{id}/status` |
 | `removeRealmRoles(keycloakId, names)` | Removes realm-role mappings | S10 | `PUT /users/{id}/roles` |
 | `sendUpdatePasswordEmail(keycloakId)` | Execute-actions email with `UPDATE_PASSWORD` | S10 | `POST /users/{id}/reset-password` |
 
-Exact Keycloak REST paths behind each method are confirmed in the sub-task that adds it.
+`…` = `{KEYCLOAK_BASE_URL}/admin/realms/{KEYCLOAK_REALM}`. JSON goes through the library's own
+provider (`org.keycloak.admin.client.JacksonProvider`): it skips fields the 26.0 library doesn't know
+when reading Keycloak 26.5's answers, and leaves empty fields out when writing — Keycloak 26.5 refuses
+fields it doesn't know, even empty ones such as `verifiableCredentials` (found in S8's real run).
+Keycloak's error text is read from `errorMessage`, else `error`. Every `KeycloakException` carries the
+message (URL, step, reason) for logs and the bare reason (`getReason()`) for the caller's message.
+Exact Keycloak REST paths behind the S9 and S10 methods are confirmed in those sub-tasks.
 
 ---
 

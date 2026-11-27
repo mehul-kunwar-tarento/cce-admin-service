@@ -31,7 +31,7 @@ A local copy of each person who can log in; 1:1 with a Keycloak user.
 |--------|------|------|---------|-------------|
 | `id` | UUID | No | `gen_random_uuid()` | Primary key |
 | `keycloak_id` | VARCHAR(36) | No | — | Keycloak user id = JWT `sub` |
-| `username` | VARCHAR(255) | No | — | Login name. Never changes (S9 rule e) |
+| `username` | VARCHAR(255) | No | — | Login name, lowercase (as Keycloak stores it; S8). Never changes (S9 rule e) |
 | `email` | VARCHAR(255) | No | — | Unique case-insensitively |
 | `first_name` | VARCHAR(255) | Yes | — | Required by the API on create and update (S8/S9 rule g); nullable in the DB |
 | `last_name` | VARCHAR(255) | Yes | — | Same as `first_name` |
@@ -282,14 +282,15 @@ behaviour: [API Reference](api-reference.md).
 
 | Field | Type | Required | Rule |
 |-------|------|----------|------|
-| `username` | String | Yes | Not in `users` (409 `USERNAME_IN_USE`) |
-| `email` | String | Yes | Valid email; not in `users` in any case (409 `EMAIL_IN_USE`) |
-| `firstName` | String | Yes | Not blank (S8 rule g) |
-| `lastName` | String | Yes | Not blank (S8 rule g) |
+| `username` | String | Yes | Trimmed and lowercased first; 3–255; not in `users` (409 `USERNAME_IN_USE`) |
+| `email` | String | Yes | Trimmed and lowercased first; valid email; max 255; not in `users` in any case (409 `EMAIL_IN_USE`) |
+| `firstName` | String | Yes | Not blank; max 255 (S8 rule g) |
+| `lastName` | String | Yes | Not blank; max 255 (S8 rule g) |
 | `facilityScope` | String | No | |
-| `roleIds` | List\<UUID\> | Yes | At least one; each must exist |
+| `roleIds` | List\<UUID\> | Yes | At least one; no `null` item; each must exist; repeats count once |
 
-A `password` field is ignored and never sent to Keycloak (B-36).
+Trimming and lowercasing happen in the record's constructor, so the checks see the cleaned values.
+A `password` field is ignored and never sent to Keycloak (B-36): the record has no such field.
 
 ### 4.2 UpdateUserRequest — `PUT /users/{id}` (S9)
 
@@ -410,7 +411,8 @@ do **not** use these token roles; they read `user_roles` (S12).
 | Model | Fields | Sub-task |
 |-------|--------|----------|
 | `UserResponse` | `id`, `username`, `email`, `firstName`, `lastName`, `status`, `roles` (`[{id, name, displayName}]`), `facilityScope`, `lastLoginAt`, `createdAt` | S9 rule d |
-| Create-user 201 body | `id`, `username`, `email`, `status`, `roles` | S8 |
+| `CreatedUserResponse` | `id`, `username`, `email`, `status`, `roles` (List\<UserRoleItem\>, A→Z by name); the 201 body of `POST /users` | S8 |
+| `UserRoleItem` | `id`, `name`, `displayName` (one role of a user) | S8 |
 | `RoleResponse` | `id`, `name`, `displayName`, `description`, `isSystem`, `createdAt`, `updatedAt` | S6 |
 | `MenuResponse` | `id`, `key`, `label`, `path`, `icon`, `type`, `parentId`, `sortOrder`, `isActive`, `children` (List\<MenuResponse\>; `[]` for a DETAIL and in the `POST`/`PUT` reply) | S5 |
 | `RoleMenuItem` | `id`, `key`, `label`, `type`, `parentId` (one item of `GET /roles/{id}/menus` and of `RoleMenusResponse.menus`) | S7 |
@@ -556,7 +558,7 @@ Our record for a user read from Keycloak.
 | Object | Content | Sub-task |
 |--------|---------|----------|
 | User | `username`, `email`, `firstName`, `lastName`; `enabled = true`; required action `UPDATE_PASSWORD`; **no credentials** | S8 |
-| Realm-role mappings | Add / remove realm roles named like our roles | S8, S10 |
+| Realm-role mappings | Add / remove realm roles named like our roles; picked from the user's available realm roles (S8) | S8, S10 |
 | Enabled flag | `false` for INACTIVE / LOCKED, `true` for ACTIVE | S10 |
 
 Realm roles themselves are created and deleted by the gateway's sync, never by this service (D4).
@@ -585,7 +587,7 @@ Realm roles themselves are created and deleted by the gateway's sync, never by t
 | `ROLE_DELETED` | `DELETE /roles/{id}` (S6) | `{role, menus: [menu keys, A–Z], permissions: [its rows]}` | null |
 | `ROLE_MENUS_UPDATED` | `PUT /roles/{id}/menus` (S7); not written when nothing changed | `{menus: [menu keys, A–Z]}` | `{menus: [menu keys, A–Z]}` |
 | `ROLE_PERMISSIONS_UPDATED` | `PUT /roles/{id}/permissions` (S11) | the rows | the rows (shows what was added and removed) |
-| `USER_CREATED` | `POST /users` (S8) | null | confirmed in S8 |
+| `USER_CREATED` | `POST /users` (S8) | null | `id`, `keycloakId`, `username`, `email`, `firstName`, `lastName`, `status` (`ACTIVE`), `facilityScope`, `roles` (names A–Z) — the `BOOTSTRAP_ADMIN_LINKED` shape plus `id` and `facilityScope` (`UserSnapshot`) |
 | `USER_UPDATED` | `PUT /users/{id}` (S9) | profile | profile |
 | `USER_ACTIVATED` | `PATCH …/status` (S10) | confirmed in S10 | confirmed in S10 |
 | `USER_DEACTIVATED` | `PATCH …/status` (S10) | confirmed in S10 | confirmed in S10 |
@@ -618,7 +620,9 @@ first one is the record. `before` is null.
 | `error` | The error | |
 | `cleanup` | What was done about it | `keycloak user deleted` / `FAILED — delete keycloak user <id> by hand` |
 
-`entity_id` of a `USER_CREATE_FAILED` row (no `users.id` exists yet) is confirmed in S8.
+`entity_id` of a `USER_CREATE_FAILED` row is the **username** (no `users.id` exists: the save
+rolled back), so an operator can search `WHERE entity_id = 'alice'`; the ERROR line shows it too.
+`failedStep` is `assign realm roles` or `save user`.
 
 ## 10. Log Fields
 
@@ -628,6 +632,7 @@ Fields the log lines carry:
 |----------|--------|
 | ERROR on a 500 (D12) | `ref` = 8-character reference id (also in the response `message`), method + path, full exception |
 | WARN on a gateway sync failure (D3) | `Gateway sync failed for role <id>: POST <url> → status=<status>, body=<full body>`; when the gateway never answered: `status=none, body=none, error=could not connect` or `error=no answer within 10s` |
+| WARN when Keycloak could not create a user (S8) | `User <username> not created: Keycloak at <url>: could not create user <username>: <reason>` — nothing half done, so no ERROR and no audit row |
 | ERROR on a half-done Keycloak/DB change (D8) | Written by `AuditWriter.recordFailure`: `<action> <entityType> <entityId>: keycloakId=…, failedStep=…, error=…, cleanup=…`; if the audit row can't be written, a second line `Audit row for <action> <entityType> <entityId> not written; the line above is the only record` with the exception |
 
 Metrics and MDC fields are **not in v1**. The log format is Spring Boot's default console format,
