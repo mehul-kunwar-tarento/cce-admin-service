@@ -233,13 +233,13 @@ List users with filters and paging (B-30, B-04).
 | Query param | Rule |
 |-------------|------|
 | `page`, `pageSize` | §2.2 |
-| `q` | Case-insensitive "contains" on username, firstName, lastName, email |
-| `status` | `ACTIVE` / `INACTIVE` / `LOCKED`; any other value → 400 `VALIDATION_ERROR` |
-| `roleId` | Users holding that role |
-| `facilityScope` | Exact match |
+| `q` | Case-insensitive "contains" on username, firstName, lastName, email. Blank = no search. `%` and `_` are plain characters (escaped in `LIKE`) |
+| `status` | `ACTIVE` / `INACTIVE` / `LOCKED`; any other value → 400 `VALIDATION_ERROR` (`Invalid request: status has an invalid value.`) |
+| `roleId` | Users holding that role; an unknown id → empty list; not a UUID → 400 |
+| `facilityScope` | Exact, case-sensitive match |
 
 Filters combine with AND. Sorted by username A→Z. INACTIVE and LOCKED users are included unless
-`status` is given.
+`status` is given. Each user's `roles` are A→Z by name; a page's roles are read in one query.
 
 **Response 200:**
 
@@ -338,19 +338,26 @@ Edit profile fields (B-33, S9). The body is the **whole profile**, not a partial
 | `lastName` | string | Yes | Not blank; sent to Keycloak |
 | `email` | string | Yes | Not blank; unique case-insensitively; sent to Keycloak |
 | `facilityScope` | string | No | Our DB only; `null` clears it; changing only this calls no Keycloak |
-| `username` | string | No | Same as now → ignored; different → 400 `VALIDATION_ERROR` |
+| `username` | string | No | Cleaned like `email`; same as now (e.g. `Alice` for `alice`) → ignored; different → 400 `VALIDATION_ERROR` |
 
-**Order:** open DB transaction → update the row (flushed, so a duplicate email fails here) →
-Keycloak `updateUser` → commit.
+`email` is trimmed and lowercased, as on create. Names and email max 255. Works for INACTIVE and
+LOCKED users, and on the caller's own profile.
+
+**Order:** open DB transaction → same values as now? then 200 with nothing written, no Keycloak, no
+audit → email taken by another user? 409 → update the row (flushed, so a duplicate email fails here,
+also in a race) → Keycloak `updateUser`, only if email or a name changed → audit → commit. Two edits
+of the same user wait on each other at the row write, so both sides end with the later one.
 
 | Status | Code | When |
 |--------|------|------|
-| 200 | — | Updated; audit `USER_UPDATED` with before/after |
-| 400 | `VALIDATION_ERROR` | `firstName`, `lastName` or `email` missing or blank; different `username`; invalid field — DB and Keycloak unchanged |
+| 200 | — | Updated (or nothing to change); body = the whole user, as `GET /users/{id}`; audit `USER_UPDATED` `{firstName, lastName, email, facilityScope}` before/after |
+| 400 | `VALIDATION_ERROR` | `firstName`, `lastName` or `email` missing, blank or over 255; bad email; different `username` — DB and Keycloak unchanged |
+| 400 | `VALIDATION_ERROR` | Keycloak refused a value — DB rolled back, no audit |
 | 404 | `USER_NOT_FOUND` | Unknown id |
-| 409 | `EMAIL_IN_USE` | Email used by another user; Keycloak not called |
-| 502 | `KEYCLOAK_SYNC_FAILED` | Keycloak update failed → DB rolled back, nothing changed, no audit |
-| 502 | `KEYCLOAK_SYNC_FAILED` | Commit failed after Keycloak succeeded → `USER_UPDATE_FAILED` recorded |
+| 409 | `EMAIL_IN_USE` | Email used by another user (also two edits racing); Keycloak not called |
+| 409 | `EMAIL_IN_USE` | Keycloak has the email on an account this service doesn't know — DB rolled back, no audit |
+| 502 | `KEYCLOAK_SYNC_FAILED` | Keycloak update failed → DB rolled back, nothing changed, no audit, WARN log |
+| 502 | `KEYCLOAK_SYNC_FAILED` | Our side failed after Keycloak took the change → `USER_UPDATE_FAILED` recorded, no undo |
 
 #### PATCH /users/{id}/status
 
@@ -928,6 +935,10 @@ exception text, SQL, stack trace, host or class name is ever put in `message`.
 | Name used by a gateway permission set (D11, 409) | `This name is already used by an existing permission set in the gateway. Choose another name.` |
 | Keycloak already has the account (S8 rule c, 409 `EMAIL_IN_USE`) | `Keycloak already has an account with this username or email that this service doesn't know. An operator must remove or link it.` |
 | Keycloak refused a value of a new user (S8, 400 `VALIDATION_ERROR`) | `Keycloak refused the user: <field> <Keycloak error>. Nothing was created.` — e.g. `username error-invalid-length`; several fields joined by `; ` |
+| Unknown user id (404 `USER_NOT_FOUND`) | `No user with id <id>.` |
+| Different username in `PUT /users/{id}` (400) | `Username cannot be changed (it is the user's Keycloak login). Nothing was changed.` |
+| Keycloak refused a profile change (S9, 400) | `Keycloak refused the change: <field> <Keycloak error>. Nothing was changed.` |
+| Keycloak has the new email on an unknown account (S9, 409 `EMAIL_IN_USE`) | `Keycloak already has an account with this email that this service doesn't know. An operator must remove or link it. Nothing was changed.` |
 | Unknown role ids in `POST /users` (400) | `Unknown role id(s): <id>, <id>. Nothing was created.` — each once, sorted as text |
 | Email taken (409 `EMAIL_IN_USE`, `POST /users`) | `Email <email> is already used by another user.` |
 | Username taken (409 `USERNAME_IN_USE`) | `Username <username> is already taken.` |
@@ -1078,7 +1089,7 @@ Each method is called at most once per request.
 | `createUser(…)` | Creates an enabled account with required action `UPDATE_PASSWORD`, no credentials. `POST …/users` → 201, id = last part of `Location`; 409 → `KeycloakConflictException`; 400 → `KeycloakRejectedException` with `<field> <errorMessage>` per field | S8 | `POST /users` |
 | `assignRealmRoles(keycloakId, names)` | `GET …/users/{id}/role-mappings/realm/available`, picks the roles by name (a missing one → `Keycloak has no realm role <NAME>`, nothing given), then one `POST …/users/{id}/role-mappings/realm`. The service account may not read a role by name (403), but may list a user's available roles | S8 | `POST /users`, `PUT /users/{id}/roles` |
 | `deleteUser(keycloakId)` | `DELETE …/users/{id}` → 204; 404 counts as deleted (create-user undo only) | S8 | `POST /users` |
-| `updateUser(keycloakId, email, firstName, lastName)` | Updates profile fields | S9 | `PUT /users/{id}` |
+| `updateUser(keycloakId, email, firstName, lastName)` | `PUT …/users/{id}` with only those three fields → 204; Keycloak keeps every other field. The library throws on an error status; the answer is read the same way as for create: 409 → `KeycloakConflictException`, 400 → `KeycloakRejectedException`, else (e.g. 404 `User not found`) → `KeycloakException` | S9 | `PUT /users/{id}` |
 | `setEnabled(keycloakId, enabled)` | Enables / disables the account | S10 | `PATCH /users/{id}/status` |
 | `removeRealmRoles(keycloakId, names)` | Removes realm-role mappings | S10 | `PUT /users/{id}/roles` |
 | `sendUpdatePasswordEmail(keycloakId)` | Execute-actions email with `UPDATE_PASSWORD` | S10 | `POST /users/{id}/reset-password` |
@@ -1089,7 +1100,7 @@ when reading Keycloak 26.5's answers, and leaves empty fields out when writing �
 fields it doesn't know, even empty ones such as `verifiableCredentials` (found in S8's real run).
 Keycloak's error text is read from `errorMessage`, else `error`. Every `KeycloakException` carries the
 message (URL, step, reason) for logs and the bare reason (`getReason()`) for the caller's message.
-Exact Keycloak REST paths behind the S9 and S10 methods are confirmed in those sub-tasks.
+Exact Keycloak REST paths behind the S10 methods are confirmed in that sub-task.
 
 ---
 

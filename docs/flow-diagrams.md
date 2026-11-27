@@ -485,7 +485,11 @@ sequenceDiagram
 
 No undo here: reverting could overwrite something that changed in the meantime, so a person fixes
 it (D8). Deactivation keeps `user_roles`, so re-activation restores the same access (B-34).
-`PUT /users/{id}` (S9) follows the same order with one Keycloak call, `updateUser`.
+`PUT /users/{id}` (S9) follows the same order with one Keycloak call, `updateUser`, made only when
+the email or a name changed; the same values return 200 before the transaction writes anything. A
+taken email is found at the row write (flush), before Keycloak. When our side fails after Keycloak
+took the change, `USER_UPDATE_FAILED` is recorded with `cleanup` = `none — make Keycloak match the
+user record by hand`.
 
 ## 12. Bootstrap Admin at Startup
 
