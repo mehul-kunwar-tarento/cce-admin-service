@@ -7,15 +7,18 @@ import org.openphc.cce.admin.api.ApiResponse;
 import org.openphc.cce.admin.api.PageParams;
 import org.openphc.cce.admin.dto.CreateUserRequest;
 import org.openphc.cce.admin.dto.CreatedUserResponse;
+import org.openphc.cce.admin.dto.UpdateUserRequest;
 import org.openphc.cce.admin.dto.UserResponse;
 import org.openphc.cce.admin.entity.UserStatus;
 import org.openphc.cce.admin.service.UserCreateService;
 import org.openphc.cce.admin.service.UserQueryService;
+import org.openphc.cce.admin.service.UserUpdateService;
 import org.springframework.data.domain.Page;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
@@ -29,10 +32,13 @@ public class UserController {
 
 	private final UserCreateService userCreateService;
 	private final UserQueryService userQueryService;
+	private final UserUpdateService userUpdateService;
 
-	public UserController(UserCreateService userCreateService, UserQueryService userQueryService) {
+	public UserController(UserCreateService userCreateService, UserQueryService userQueryService,
+			UserUpdateService userUpdateService) {
 		this.userCreateService = userCreateService;
 		this.userQueryService = userQueryService;
+		this.userUpdateService = userUpdateService;
 	}
 
 	@GetMapping("/admin/v1/users")
@@ -48,6 +54,11 @@ public class UserController {
 	@GetMapping("/admin/v1/users/{id}")
 	public ApiResponse<UserResponse> get(@PathVariable UUID id) {
 		return ApiResponse.of(userQueryService.get(id));
+	}
+
+	@PutMapping("/admin/v1/users/{id}")
+	public ApiResponse<UserResponse> update(@PathVariable UUID id, @Valid @RequestBody UpdateUserRequest request) {
+		return ApiResponse.of(userUpdateService.update(id, request));
 	}
 
 	@PostMapping("/admin/v1/users")
