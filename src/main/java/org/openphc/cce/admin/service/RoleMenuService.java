@@ -57,7 +57,9 @@ public class RoleMenuService {
 	/** Replaces the role's menus with the given set. Every check runs before anything is written. */
 	@Transactional
 	public RoleMenusResponse put(UUID roleId, RoleMenusRequest request) {
-		Optional<Role> found = roleRepository.findById(roleId);
+		// Locked: a second save of the same role (e.g. a double click) waits here until this one commits,
+		// then sees the saved set
+		Optional<Role> found = roleRepository.findLockedById(roleId);
 		if (found.isEmpty()) {
 			throw RoleService.notFound(roleId);
 		}
