@@ -327,7 +327,7 @@ DTO names confirmed in S10.
 
 | Field | Type | Rule |
 |-------|------|------|
-| `menuIds` | List\<UUID\> | Full set; may be empty; duplicates count once; each must exist |
+| `menuIds` | List\<UUID\> | Required (missing → 400); full set; may be empty; no `null` items; duplicates count once; each must exist |
 
 ### 4.6 RolePermissionsRequest / PermissionRow — `PUT /roles/{id}/permissions` (S11)
 
@@ -413,7 +413,8 @@ do **not** use these token roles; they read `user_roles` (S12).
 | Create-user 201 body | `id`, `username`, `email`, `status`, `roles` | S8 |
 | `RoleResponse` | `id`, `name`, `displayName`, `description`, `isSystem`, `createdAt`, `updatedAt` | S6 |
 | `MenuResponse` | `id`, `key`, `label`, `path`, `icon`, `type`, `parentId`, `sortOrder`, `isActive`, `children` (List\<MenuResponse\>; `[]` for a DETAIL and in the `POST`/`PUT` reply) | S5 |
-| `RoleMenusResponse` | `menus` (`[{id, key, label, type, parentId}]`), `warnings` (List\<String\>) | S7 |
+| `RoleMenuItem` | `id`, `key`, `label`, `type`, `parentId` (one item of `GET /roles/{id}/menus` and of `RoleMenusResponse.menus`) | S7 |
+| `RoleMenusResponse` | `menus` (List\<RoleMenuItem\>, sidebar order: `sortOrder`, then `key`), `warnings` (List\<String\>, one per DETAIL without its NAV parent) | S7 |
 | `PermissionRow` | `id` (Long), `httpMethod`, `uriPattern`, `description`, `resourceCategory` | S11 |
 | `MeResponse` | `id`, `username`, `email`, `firstName`, `lastName`, `roles` (sorted names), `facilityScope` | S12 rule a |
 | `MenuNode` | `id`, `key`, `label`, `path`, `icon`, `type`, `children` | S12 rule d |
@@ -582,7 +583,7 @@ Realm roles themselves are created and deleted by the gateway's sync, never by t
 | `ROLE_CREATED` | `POST /roles` (S6) | null | `{role: <the role>, permissions: [the GET /admin/v1/me/menus row]}`; the role = `id`, `name`, `displayName`, `description`, `isSystem`; a row = `id`, `httpMethod`, `uriPattern`, `description`, `resourceCategory` |
 | `ROLE_UPDATED` | `PUT /roles/{id}` (S6); not written when nothing changed | the role (as above) | the role (as above) |
 | `ROLE_DELETED` | `DELETE /roles/{id}` (S6) | `{role, menus: [menu keys, A–Z], permissions: [its rows]}` | null |
-| `ROLE_MENUS_UPDATED` | `PUT /roles/{id}/menus` (S7) | menu keys | menu keys |
+| `ROLE_MENUS_UPDATED` | `PUT /roles/{id}/menus` (S7); not written when nothing changed | `{menus: [menu keys, A–Z]}` | `{menus: [menu keys, A–Z]}` |
 | `ROLE_PERMISSIONS_UPDATED` | `PUT /roles/{id}/permissions` (S11) | the rows | the rows (shows what was added and removed) |
 | `USER_CREATED` | `POST /users` (S8) | null | confirmed in S8 |
 | `USER_UPDATED` | `PUT /users/{id}` (S9) | profile | profile |

@@ -526,7 +526,8 @@ Role → menu is a soft control: no Keycloak or gateway call (S7).
 
 #### GET /roles/{id}/menus
 
-**Response 200:** a flat list.
+**Response 200:** a flat list of `{id, key, label, type, parentId}`, in sidebar order (`sortOrder`,
+then `key`). A role without menus → `data: []`.
 
 ```json
 {
@@ -539,6 +540,7 @@ Role → menu is a soft control: no Keycloak or gateway call (S7).
 
 | Status | Code | When |
 |--------|------|------|
+| 400 | `VALIDATION_ERROR` | `id` is not a UUID |
 | 404 | `ROLE_NOT_FOUND` | Unknown role |
 
 #### PUT /roles/{id}/menus
@@ -547,11 +549,28 @@ Role → menu is a soft control: no Keycloak or gateway call (S7).
 
 | Rule | Detail |
 |------|--------|
+| `menuIds` missing (`{}`) or a `null` in it | 400 — never read as "no menus" |
 | Duplicate ids | Treated as one |
 | Empty list | Allowed — the role's users see an empty sidebar (D6) |
 | Inactive menus | Can be assigned; `/me/menus` hides them |
-| DETAIL without its NAV parent | Saved, with a warning in `data.warnings` (B-41) |
+| DETAIL without its NAV parent | Saved, with a warning in `data.warnings` (B-41). The warning is shown on every save while it holds, also when nothing changed |
 | System role | 409 `SYSTEM_ROLE_IMMUTABLE` |
+| Only the difference is written | Links that stay keep their `created_at` |
+| Same save sent twice at once (double click) | The role row is locked for the save, so the second waits, finds the same set and answers `200` without an audit row |
+| Two admins at once (known, accepted) | A save racing a delete of the same role, or a delete of one of its menus, can answer `500`; repeating the request gives the right answer |
+
+**Check order** (first failure stops; nothing is written until all pass):
+
+```
+0. Body: menuIds present, no null, every item a UUID   no  → 400 VALIDATION_ERROR
+1. Role exists?                                        no  → 404 ROLE_NOT_FOUND
+2. System role?                                        yes → 409 SYSTEM_ROLE_IMMUTABLE (even with unknown ids)
+3. Every menu id exists?                               no  → 400 VALIDATION_ERROR naming them
+4. Same set as now?                                    yes → 200, nothing written, no audit
+5. Delete removed links, insert new ones, audit ROLE_MENUS_UPDATED → 200
+```
+
+The reply's `menus` are the saved set in sidebar order (as `GET`).
 
 **Response 200:**
 
@@ -559,10 +578,11 @@ Role → menu is a soft control: no Keycloak or gateway call (S7).
 {
   "data": {
     "menus": [
+      { "id": "5d1c…", "key": "dashboard", "label": "Dashboard", "type": "NAV", "parentId": null },
       { "id": "e2b9…", "key": "patient-detail", "label": "Patient detail", "type": "DETAIL", "parentId": "91d4…" }
     ],
     "warnings": [
-      "DETAIL 'patient-detail' given without its parent 'patients'; it will not show in the sidebar."
+      "DETAIL 'patient-detail' given without its parent 'patients'; users get it only if another of their roles gives 'patients'."
     ]
   }
 }
@@ -571,7 +591,7 @@ Role → menu is a soft control: no Keycloak or gateway call (S7).
 | Status | Code | When |
 |--------|------|------|
 | 200 | — | Saved; audit `ROLE_MENUS_UPDATED` with menu keys before/after. Same set → no audit |
-| 400 | `VALIDATION_ERROR` | Unknown menu id (the message names the ids) |
+| 400 | `VALIDATION_ERROR` | `menuIds` missing or containing `null`; an item or the URL `id` not a UUID; unknown menu id (the message names the ids) |
 | 404 | `ROLE_NOT_FOUND` | Unknown role |
 | 409 | `SYSTEM_ROLE_IMMUTABLE` | System role |
 
@@ -847,7 +867,7 @@ curl -s -X PUT http://localhost:8085/admin/v1/roles/a91f…/menus \
   -d '{"menuIds": ["<dashboard id>", "<patient-detail id>"]}'
 ```
 
-**200 OK**, saved, with `warnings: ["DETAIL 'patient-detail' given without its parent 'patients'; it will not show in the sidebar."]` (§3.5).
+**200 OK**, saved, with `warnings: ["DETAIL 'patient-detail' given without its parent 'patients'; users get it only if another of their roles gives 'patients'."]` (§3.5).
 
 ---
 
@@ -908,6 +928,8 @@ exception text, SQL, stack trace, host or class name is ever put in `message`.
 | System role changed or deleted (409 `SYSTEM_ROLE_IMMUTABLE`) | `'<NAME>' is a system role and can't be changed or deleted.` |
 | Role still held by a user (409 `ROLE_IN_USE`) | `'<NAME>' is still held by at least one user (active or not). Remove it from those users first. Nothing was deleted.` |
 | Unknown menu id (404 `MENU_NOT_FOUND`) | `No menu with id <id>.` |
+| Unknown menu ids in `PUT /roles/{id}/menus` (400) | `Unknown menu id(s): <id>, <id>. Nothing was changed.` — each once, sorted as text |
+| `menuIds` missing / a `null` in it | `Invalid request: menuIds must not be null.` / `Invalid request: menuIds[1] must not be null.` |
 | Menu key taken (409 `DUPLICATE_MENU_KEY`) | `A menu with key '<key>' already exists.` |
 | Menu key changed in `PUT` | `Menu key cannot be changed (consoles find their screens by it). To use a different key, create a new menu. Nothing was changed.` |
 | Menu `isActive` missing in `PUT` | `Invalid request: isActive must not be null.` |
@@ -919,7 +941,7 @@ exception text, SQL, stack trace, host or class name is ever put in `message`.
 | `PUT` turning a menu with DETAIL menus into a DETAIL | `'<key>' has DETAIL menus under it, so it can't become a DETAIL. Move or delete them first. Nothing was changed.` |
 | `DELETE` of a NAV with DETAIL menus | `'<key>' still has DETAIL menus under it. Delete or move its DETAIL menus first. Nothing was deleted.` |
 
-Messages of other expected errors (other 404s and duplicates, unknown menu ids in S7) are confirmed in the
+Messages of other expected errors (other 404s and duplicates) are confirmed in the
 sub-task that raises them. Expected errors never carry a reference id (D12 point 6).
 
 ### 5.4 502 `KEYCLOAK_SYNC_FAILED` messages
