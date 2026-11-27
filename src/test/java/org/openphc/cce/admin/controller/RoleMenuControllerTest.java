@@ -2,6 +2,7 @@ package org.openphc.cce.admin.controller;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.contains;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -11,13 +12,17 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.sql.Timestamp;
 import java.util.Map;
 import java.util.UUID;
 
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.openphc.cce.admin.audit.AuditAction;
+import org.openphc.cce.admin.audit.AuditAssert;
 import org.openphc.cce.admin.client.GatewaySyncClient;
+import org.openphc.cce.admin.client.KeycloakClient;
 import org.openphc.cce.admin.security.TestTokens;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -83,9 +88,12 @@ class RoleMenuControllerTest {
 	@Autowired
 	private EntityManager entityManager;
 
-	// No gateway in tests
+	// No gateway or Keycloak in tests; role menus must never call either
 	@MockitoBean
 	private GatewaySyncClient gatewaySyncClient;
+
+	@MockitoBean
+	private KeycloakClient keycloakClient;
 
 	@BeforeEach
 	void insertAdmin() {
@@ -163,6 +171,130 @@ class RoleMenuControllerTest {
 				.andExpect(status().isBadRequest())
 				.andExpect(content().json(errorJson("VALIDATION_ERROR", "Invalid request: id has an invalid value."),
 						JsonCompareMode.STRICT));
+	}
+
+	// ---- PUT /roles/{id}/menus: saved ----
+
+	@Test
+	void replaceChangesOnlyTheDifference() throws Exception {
+		UUID id = insertRole("NURSE");
+		// An old date, so a link that was deleted and inserted again would show a new one
+		Timestamp longAgo = Timestamp.valueOf("2020-01-01 00:00:00");
+		linkMenuAt(id, "dashboard", longAgo);
+		linkMenu(id, "exports");
+
+		putMenus(id.toString(), menuIdsBody("dashboard", "compliance"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.data.menus[*].key").value(contains("dashboard", "compliance")))
+				.andExpect(content().json("{\"data\": {\"warnings\": []}}"));
+		sendPendingWrites();
+
+		assertLinks(id, "compliance", "dashboard");
+		assertThat(linkCreatedAt(id, "dashboard")).isEqualTo(longAgo);
+		AuditAssert.exactlyOneRow(jdbc, AuditAction.ROLE_MENUS_UPDATED, id.toString());
+		Map<String, Object> audit = jdbc.queryForMap("SELECT entity_type, before::text AS before,"
+				+ " after::text AS after FROM audit_log WHERE entity_id = ?", id.toString());
+		assertThat(audit.get("entity_type")).isEqualTo("ROLE");
+		assertThat(objectMapper.readTree((String) audit.get("before")))
+				.isEqualTo(objectMapper.readTree("{\"menus\": [\"dashboard\", \"exports\"]}"));
+		assertThat(objectMapper.readTree((String) audit.get("after")))
+				.isEqualTo(objectMapper.readTree("{\"menus\": [\"compliance\", \"dashboard\"]}"));
+	}
+
+	@Test
+	void detailWithoutItsParentIsSavedWithAWarning() throws Exception {
+		UUID id = insertRole("NURSE");
+
+		putMenus(id.toString(), menuIdsBody("patient-detail"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.data.menus[*].key").value(contains("patient-detail")))
+				.andExpect(jsonPath("$.data.warnings").value(contains("DETAIL 'patient-detail' given without its"
+						+ " parent 'patients'; users get it only if another of their roles gives 'patients'.")));
+		sendPendingWrites();
+
+		assertLinks(id, "patient-detail");
+	}
+
+	@Test
+	void detailWithItsParentHasNoWarning() throws Exception {
+		UUID id = insertRole("NURSE");
+
+		putMenus(id.toString(), menuIdsBody("patients", "patient-detail"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.data.menus[*].key").value(contains("patients", "patient-detail")))
+				.andExpect(content().json("{\"data\": {\"warnings\": []}}"));
+	}
+
+	@Test
+	void emptyListRemovesEveryMenu() throws Exception {
+		UUID id = insertRole("NURSE");
+		linkMenu(id, "dashboard");
+		linkMenu(id, "exports");
+
+		putMenus(id.toString(), "{\"menuIds\": []}")
+				.andExpect(status().isOk())
+				.andExpect(content().json("{\"data\": {\"menus\": [], \"warnings\": []}}", JsonCompareMode.STRICT));
+		sendPendingWrites();
+
+		assertLinks(id);
+		String after = jdbc.queryForObject("SELECT after::text FROM audit_log WHERE entity_id = ?", String.class,
+				id.toString());
+		assertThat(objectMapper.readTree(after)).isEqualTo(objectMapper.readTree("{\"menus\": []}"));
+	}
+
+	@Test
+	void duplicateIdsAreSavedOnce() throws Exception {
+		UUID id = insertRole("NURSE");
+
+		putMenus(id.toString(), menuIdsBody("dashboard", "dashboard"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.data.menus[*].key").value(contains("dashboard")));
+		sendPendingWrites();
+
+		assertLinks(id, "dashboard");
+	}
+
+	@Test
+	void sameSetWritesNothing() throws Exception {
+		UUID id = insertRole("NURSE");
+		linkMenu(id, "dashboard");
+		linkMenu(id, "patient-detail");
+
+		// The same set in another order, with one id twice
+		putMenus(id.toString(), menuIdsBody("patient-detail", "dashboard", "patient-detail"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.data.menus[*].key").value(contains("dashboard", "patient-detail")))
+				.andExpect(jsonPath("$.data.warnings.length()").value(1));
+		sendPendingWrites();
+
+		assertLinks(id, "dashboard", "patient-detail");
+		assertThat(jdbc.queryForObject("SELECT count(*) FROM audit_log", Integer.class)).isZero();
+	}
+
+	@Test
+	void inactiveMenuCanBeAssigned() throws Exception {
+		jdbc.update("UPDATE menus SET is_active = false WHERE key = 'events'");
+		UUID id = insertRole("NURSE");
+
+		putMenus(id.toString(), menuIdsBody("events"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.data.menus[*].key").value(contains("events")));
+		sendPendingWrites();
+
+		assertLinks(id, "events");
+	}
+
+	@Test
+	void noGatewayOrKeycloakCall() throws Exception {
+		UUID id = insertRole("NURSE");
+		linkMenu(id, "exports");
+
+		getMenus(id.toString()).andExpect(status().isOk());
+		putMenus(id.toString(), menuIdsBody("dashboard", "patient-detail")).andExpect(status().isOk());
+		putMenus(id.toString(), menuIdsBody("dashboard", "patient-detail")).andExpect(status().isOk());
+
+		verifyNoInteractions(gatewaySyncClient);
+		verifyNoInteractions(keycloakClient);
 	}
 
 	// ---- PUT /roles/{id}/menus: rejected ----
@@ -306,6 +438,16 @@ class RoleMenuControllerTest {
 
 	private void linkMenu(UUID roleId, String menuKey) {
 		jdbc.update("INSERT INTO role_menus (role_id, menu_id) SELECT ?, id FROM menus WHERE key = ?", roleId, menuKey);
+	}
+
+	private void linkMenuAt(UUID roleId, String menuKey, Timestamp createdAt) {
+		jdbc.update("INSERT INTO role_menus (role_id, menu_id, created_at) SELECT ?, id, ? FROM menus WHERE key = ?",
+				roleId, createdAt, menuKey);
+	}
+
+	private Timestamp linkCreatedAt(UUID roleId, String menuKey) {
+		return jdbc.queryForObject("SELECT rm.created_at FROM role_menus rm JOIN menus m ON m.id = rm.menu_id"
+				+ " WHERE rm.role_id = ? AND m.key = ?", Timestamp.class, roleId, menuKey);
 	}
 
 	private UUID menuId(String key) {

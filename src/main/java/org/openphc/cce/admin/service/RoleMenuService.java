@@ -8,11 +8,16 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
+import org.openphc.cce.admin.audit.AuditAction;
+import org.openphc.cce.admin.audit.AuditWriter;
 import org.openphc.cce.admin.dto.RoleMenuItem;
 import org.openphc.cce.admin.dto.RoleMenusRequest;
 import org.openphc.cce.admin.dto.RoleMenusResponse;
+import org.openphc.cce.admin.dto.RoleMenusSnapshot;
 import org.openphc.cce.admin.entity.Menu;
+import org.openphc.cce.admin.entity.MenuType;
 import org.openphc.cce.admin.entity.Role;
+import org.openphc.cce.admin.entity.RoleMenu;
 import org.openphc.cce.admin.error.ApiException;
 import org.openphc.cce.admin.error.ErrorCode;
 import org.openphc.cce.admin.repository.MenuRepository;
@@ -26,15 +31,19 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class RoleMenuService {
 
+	private static final String ENTITY_TYPE = "ROLE";
+
 	private final RoleRepository roleRepository;
 	private final RoleMenuRepository roleMenuRepository;
 	private final MenuRepository menuRepository;
+	private final AuditWriter auditWriter;
 
 	public RoleMenuService(RoleRepository roleRepository, RoleMenuRepository roleMenuRepository,
-			MenuRepository menuRepository) {
+			MenuRepository menuRepository, AuditWriter auditWriter) {
 		this.roleRepository = roleRepository;
 		this.roleMenuRepository = roleMenuRepository;
 		this.menuRepository = menuRepository;
+		this.auditWriter = auditWriter;
 	}
 
 	@Transactional(readOnly = true)
@@ -42,12 +51,7 @@ public class RoleMenuService {
 		if (!roleRepository.existsById(roleId)) {
 			throw RoleService.notFound(roleId);
 		}
-		List<Menu> menus = roleMenuRepository.findMenusOfRole(roleId);
-		List<RoleMenuItem> items = new ArrayList<>();
-		for (Menu menu : menus) {
-			items.add(RoleMenuItem.from(menu));
-		}
-		return items;
+		return menusOf(roleId);
 	}
 
 	/** Replaces the role's menus with the given set. Every check runs before anything is written. */
@@ -66,8 +70,76 @@ public class RoleMenuService {
 		Set<UUID> wanted = new HashSet<>(request.menuIds());
 		checkMenusExist(wanted);
 
-		// Saving the new set comes next; for now the reply is the role's current menus
-		return new RoleMenusResponse(get(roleId), new ArrayList<>());
+		Set<UUID> current = currentMenuIds(roleId);
+		// The same set as now: nothing to save and nothing to audit
+		if (!wanted.equals(current)) {
+			saveDifference(roleId, current, wanted);
+		}
+		List<RoleMenuItem> menus = menusOf(roleId);
+		return new RoleMenusResponse(menus, warningsFor(menus));
+	}
+
+	/** The role's menus in sidebar order. */
+	private List<RoleMenuItem> menusOf(UUID roleId) {
+		List<Menu> menus = roleMenuRepository.findMenusOfRole(roleId);
+		List<RoleMenuItem> items = new ArrayList<>();
+		for (Menu menu : menus) {
+			items.add(RoleMenuItem.from(menu));
+		}
+		return items;
+	}
+
+	private Set<UUID> currentMenuIds(UUID roleId) {
+		Set<UUID> ids = new HashSet<>();
+		for (RoleMenu link : roleMenuRepository.findByRoleId(roleId)) {
+			ids.add(link.getMenuId());
+		}
+		return ids;
+	}
+
+	/** Removes the links that are no longer wanted, adds the new ones, and records one audit row. */
+	private void saveDifference(UUID roleId, Set<UUID> current, Set<UUID> wanted) {
+		RoleMenusSnapshot before = new RoleMenusSnapshot(roleMenuRepository.findMenuKeysOfRole(roleId));
+
+		List<RoleMenu> removed = new ArrayList<>();
+		for (RoleMenu link : roleMenuRepository.findByRoleId(roleId)) {
+			if (!wanted.contains(link.getMenuId())) {
+				removed.add(link);
+			}
+		}
+		List<RoleMenu> added = new ArrayList<>();
+		for (UUID menuId : wanted) {
+			if (!current.contains(menuId)) {
+				added.add(new RoleMenu(roleId, menuId));
+			}
+		}
+		roleMenuRepository.deleteAll(removed);
+		roleMenuRepository.saveAll(added);
+		// Write now rather than at commit, so a database error surfaces here
+		roleMenuRepository.flush();
+
+		RoleMenusSnapshot after = new RoleMenusSnapshot(roleMenuRepository.findMenuKeysOfRole(roleId));
+		auditWriter.record(AuditAction.ROLE_MENUS_UPDATED, ENTITY_TYPE, roleId.toString(), before, after);
+	}
+
+	/**
+	 * One warning per DETAIL whose NAV parent is not in the list. It is saved anyway: a user who also holds
+	 * a role that gives the parent still gets it.
+	 */
+	private List<String> warningsFor(List<RoleMenuItem> menus) {
+		Set<UUID> ids = new HashSet<>();
+		for (RoleMenuItem menu : menus) {
+			ids.add(menu.id());
+		}
+		List<String> warnings = new ArrayList<>();
+		for (RoleMenuItem menu : menus) {
+			if (menu.type() == MenuType.DETAIL && !ids.contains(menu.parentId())) {
+				String parentKey = menuRepository.findById(menu.parentId()).get().getKey();
+				warnings.add("DETAIL '" + menu.key() + "' given without its parent '" + parentKey
+						+ "'; users get it only if another of their roles gives '" + parentKey + "'.");
+			}
+		}
+		return warnings;
 	}
 
 	/** 400 naming every id that is not a menu, sorted so the message is the same every time. */

@@ -28,6 +28,12 @@ public class RoleMenu {
 	protected RoleMenu() {
 	}
 
+	/** A new link, not saved yet. */
+	public RoleMenu(UUID roleId, UUID menuId) {
+		this.roleId = roleId;
+		this.menuId = menuId;
+	}
+
 	public UUID getRoleId() {
 		return roleId;
 	}
