@@ -256,7 +256,8 @@ public class RoleService {
 		return text;
 	}
 
-	private ApiException notFound(UUID id) {
+	// Also used by RoleMenuService, so both give the same text
+	static ApiException notFound(UUID id) {
 		return new ApiException(HttpStatus.NOT_FOUND, ErrorCode.ROLE_NOT_FOUND, "No role with id " + id + ".");
 	}
 
