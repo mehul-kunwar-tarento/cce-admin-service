@@ -3,6 +3,7 @@ package org.openphc.cce.admin.repository;
 import java.util.List;
 import java.util.UUID;
 
+import org.openphc.cce.admin.entity.Menu;
 import org.openphc.cce.admin.entity.RoleMenu;
 import org.openphc.cce.admin.entity.RoleMenuId;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -19,4 +20,9 @@ public interface RoleMenuRepository extends JpaRepository<RoleMenu, RoleMenuId> 
 	/** The keys of the menus this role has, A to Z. */
 	@Query("SELECT m.key FROM Menu m, RoleMenu rm WHERE rm.menuId = m.id AND rm.roleId = :roleId ORDER BY m.key")
 	List<String> findMenuKeysOfRole(@Param("roleId") UUID roleId);
+
+	/** The menus this role has, in sidebar order: sortOrder, then key. */
+	@Query("SELECT m FROM Menu m, RoleMenu rm WHERE rm.menuId = m.id AND rm.roleId = :roleId"
+			+ " ORDER BY m.sortOrder, m.key")
+	List<Menu> findMenusOfRole(@Param("roleId") UUID roleId);
 }
