@@ -261,7 +261,8 @@ public class RoleService {
 		return new ApiException(HttpStatus.NOT_FOUND, ErrorCode.ROLE_NOT_FOUND, "No role with id " + id + ".");
 	}
 
-	private ApiException systemRole(String name) {
+	// Also used by RoleMenuService, so both give the same text
+	static ApiException systemRole(String name) {
 		return new ApiException(HttpStatus.CONFLICT, ErrorCode.SYSTEM_ROLE_IMMUTABLE,
 				"'" + name + "' is a system role and can't be changed or deleted.");
 	}
