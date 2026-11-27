@@ -24,6 +24,7 @@ import org.springframework.stereotype.Component;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.client.ClientBuilder;
 import jakarta.ws.rs.core.Response;
 
@@ -124,15 +125,40 @@ public class KeycloakAdminClient implements KeycloakClient {
 				// The new id is the last part of the Location header: …/users/<id>
 				return CreatedResponseUtil.getCreatedId(response);
 			}
-			JsonNode body = readJson(response);
-			if (status == 409) {
-				throw new KeycloakConflictException(prefix(step), errorMessage(body, status));
-			}
-			if (status == 400) {
-				throw new KeycloakRejectedException(prefix(step), fieldErrors(body));
-			}
-			throw new KeycloakException(prefix(step), errorMessage(body, status), null);
+			throw answerFailure(step, response);
 		}
+	}
+
+	@Override
+	public void updateUser(String keycloakId, String email, String firstName, String lastName) {
+		// Only these three are sent; Keycloak keeps every field that is left out
+		UserRepresentation changes = new UserRepresentation();
+		changes.setEmail(email);
+		changes.setFirstName(firstName);
+		changes.setLastName(lastName);
+
+		String step = "update user " + keycloakId;
+		try {
+			keycloak.realm(realm).users().get(keycloakId).update(changes);
+		} catch (WebApplicationException e) {
+			// Keycloak answered, with an error status; unlike create(), update() throws instead of returning it
+			throw answerFailure(step, e.getResponse());
+		} catch (RuntimeException e) {
+			throw failure(step, e);
+		}
+	}
+
+	/** Keycloak's error answer as an exception: 409 conflict, 400 refused value, anything else a failure. */
+	private KeycloakException answerFailure(String step, Response response) {
+		int status = response.getStatus();
+		JsonNode body = readJson(response);
+		if (status == 409) {
+			return new KeycloakConflictException(prefix(step), errorMessage(body, status));
+		}
+		if (status == 400) {
+			return new KeycloakRejectedException(prefix(step), fieldErrors(body));
+		}
+		return new KeycloakException(prefix(step), errorMessage(body, status), null);
 	}
 
 	@Override

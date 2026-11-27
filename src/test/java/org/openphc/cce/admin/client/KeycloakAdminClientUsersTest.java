@@ -12,6 +12,8 @@ import static com.github.tomakehurst.wiremock.client.WireMock.notContaining;
 import static com.github.tomakehurst.wiremock.client.WireMock.okJson;
 import static com.github.tomakehurst.wiremock.client.WireMock.post;
 import static com.github.tomakehurst.wiremock.client.WireMock.postRequestedFor;
+import static com.github.tomakehurst.wiremock.client.WireMock.put;
+import static com.github.tomakehurst.wiremock.client.WireMock.putRequestedFor;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo;
 import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.wireMockConfig;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -217,6 +219,56 @@ class KeycloakAdminClientUsersTest {
 				.hasMessage("Keycloak at " + keycloak.baseUrl() + ": could not delete user " + NEW_ID + ": HTTP 500")
 				.satisfies(e -> assertThat(((KeycloakException) e).getReason()).isEqualTo("HTTP 500"));
 		keycloak.verify(1, deleteRequestedFor(urlEqualTo(USER_PATH)));
+	}
+
+	// ---- updateUser ----
+
+	@Test
+	void updateSendsOnlyEmailAndNames() {
+		keycloak.stubFor(put(urlEqualTo(USER_PATH)).willReturn(aResponse().withStatus(204)));
+
+		client().updateUser(NEW_ID, "alice.o@example.org", "Alice", "Otieno");
+
+		// Strict: exactly these three fields, so Keycloak keeps enabled, required actions and the rest
+		keycloak.verify(1, putRequestedFor(urlEqualTo(USER_PATH)).withRequestBody(equalToJson(
+				"{\"email\":\"alice.o@example.org\",\"firstName\":\"Alice\",\"lastName\":\"Otieno\"}", false,
+				false)));
+	}
+
+	@Test
+	void emailOfAnotherKeycloakAccountIsAConflict() {
+		keycloakUserAnswers(409, "{\"errorMessage\":\"User exists with same email\"}");
+
+		assertThatThrownBy(() -> client().updateUser(NEW_ID, "taken@example.org", "Alice", "Otieno"))
+				.isInstanceOf(KeycloakConflictException.class)
+				.hasMessage("Keycloak at " + keycloak.baseUrl() + ": could not update user " + NEW_ID
+						+ ": User exists with same email");
+		keycloak.verify(1, putRequestedFor(urlEqualTo(USER_PATH)));
+	}
+
+	@Test
+	void refusedNameOnUpdateIsRejectedWithItsReason() {
+		keycloakUserAnswers(400,
+				"{\"field\":\"firstName\",\"errorMessage\":\"error-person-name-invalid-character\",\"params\":[\"firstName\"]}");
+
+		assertThatThrownBy(() -> client().updateUser(NEW_ID, "alice@example.org", "<b>", "Otieno"))
+				.isInstanceOfSatisfying(KeycloakRejectedException.class, e -> assertThat(e.getReason())
+						.isEqualTo("firstName error-person-name-invalid-character"));
+	}
+
+	@Test
+	void unknownKeycloakUserOnUpdateIsAPlainFailure() {
+		keycloakUserAnswers(404, "{\"error\":\"User not found\"}");
+
+		assertThatThrownBy(() -> client().updateUser(NEW_ID, "alice@example.org", "Alice", "Otieno"))
+				.isExactlyInstanceOf(KeycloakException.class)
+				.satisfies(e -> assertThat(((KeycloakException) e).getReason()).isEqualTo("User not found"));
+		keycloak.verify(1, putRequestedFor(urlEqualTo(USER_PATH)));
+	}
+
+	private void keycloakUserAnswers(int status, String body) {
+		keycloak.stubFor(put(urlEqualTo(USER_PATH)).willReturn(aResponse().withStatus(status)
+				.withHeader("Content-Type", "application/json").withBody(body)));
 	}
 
 	private void keycloakUsersAnswer(int status, String body) {
