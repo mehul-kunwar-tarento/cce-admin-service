@@ -9,9 +9,9 @@ import java.util.concurrent.TimeUnit;
 
 import org.jboss.resteasy.client.jaxrs.ResteasyClient;
 import org.jboss.resteasy.client.jaxrs.ResteasyClientBuilder;
-import org.jboss.resteasy.plugins.providers.jackson.ResteasyJackson2Provider;
 import org.keycloak.OAuth2Constants;
 import org.keycloak.admin.client.CreatedResponseUtil;
+import org.keycloak.admin.client.JacksonProvider;
 import org.keycloak.admin.client.Keycloak;
 import org.keycloak.admin.client.KeycloakBuilder;
 import org.keycloak.admin.client.resource.RoleScopeResource;
@@ -21,7 +21,6 @@ import org.openphc.cce.admin.config.KeycloakProperties;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
-import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -39,7 +38,8 @@ public class KeycloakAdminClient implements KeycloakClient {
 	private static final String UPDATE_PASSWORD = "UPDATE_PASSWORD";
 
 	private final Keycloak keycloak;
-	private final ObjectMapper objectMapper;
+	// Reads Keycloak's error bodies only; requests and answers go through Keycloak's own JSON setup
+	private final ObjectMapper objectMapper = new ObjectMapper();
 	private final String realm;
 	private final String baseUrl;
 
@@ -53,7 +53,6 @@ public class KeycloakAdminClient implements KeycloakClient {
 	KeycloakAdminClient(KeycloakProperties properties, Duration timeout) {
 		this.realm = properties.realm();
 		this.baseUrl = properties.baseUrl();
-		this.objectMapper = lenientObjectMapper();
 		// Building does not connect; the first call fetches a token, then makes the request
 		this.keycloak = KeycloakBuilder.builder()
 				.serverUrl(properties.baseUrl())
@@ -62,7 +61,7 @@ public class KeycloakAdminClient implements KeycloakClient {
 				.grantType(OAuth2Constants.CLIENT_CREDENTIALS)
 				.clientId(properties.clientId())
 				.clientSecret(properties.clientSecret())
-				.resteasyClient(httpClient(timeout, objectMapper))
+				.resteasyClient(httpClient(timeout))
 				.build();
 	}
 
@@ -222,15 +221,32 @@ public class KeycloakAdminClient implements KeycloakClient {
 		return error.path("field").asText() + " " + error.path("errorMessage").asText();
 	}
 
-	/** Keycloak's own text, e.g. "User exists with same username"; just the status when there is none. */
+	/**
+	 * Keycloak's own text, from "errorMessage" (e.g. "User exists with same username") or "error" (e.g. "Invalid
+	 * json representation …"); just the status when there is neither.
+	 */
 	private String errorMessage(JsonNode body, int status) {
-		if (body != null) {
-			JsonNode message = body.get("errorMessage");
-			if (message != null && message.isTextual() && !message.asText().isBlank()) {
-				return message.asText();
-			}
+		String message = textField(body, "errorMessage");
+		if (message != null) {
+			return message;
+		}
+		message = textField(body, "error");
+		if (message != null) {
+			return message;
 		}
 		return "HTTP " + status;
+	}
+
+	/** The field's text; null when the body or the field is missing, not text, or blank. */
+	private String textField(JsonNode body, String name) {
+		if (body == null) {
+			return null;
+		}
+		JsonNode field = body.get(name);
+		if (field == null || !field.isTextual() || field.asText().isBlank()) {
+			return null;
+		}
+		return field.asText();
 	}
 
 	/** Null when the body is empty or not JSON. */
@@ -269,21 +285,13 @@ public class KeycloakAdminClient implements KeycloakClient {
 		return root.getMessage();
 	}
 
-	// Keycloak 26.5 sends fields the 26.0 library does not know; skip them instead of failing to read
-	private ObjectMapper lenientObjectMapper() {
-		ObjectMapper mapper = new ObjectMapper();
-		mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
-		return mapper;
-	}
-
-	private ResteasyClient httpClient(Duration timeout, ObjectMapper objectMapper) {
-		ResteasyJackson2Provider jsonReader = new ResteasyJackson2Provider();
-		jsonReader.setMapper(objectMapper);
-
+	private ResteasyClient httpClient(Duration timeout) {
 		ResteasyClientBuilder builder = (ResteasyClientBuilder) ClientBuilder.newBuilder();
 		builder.connectTimeout(timeout.toMillis(), TimeUnit.MILLISECONDS);
 		builder.readTimeout(timeout.toMillis(), TimeUnit.MILLISECONDS);
-		builder.register(jsonReader);
+		// Keycloak's own JSON setup: skips fields it does not know when reading (Keycloak 26.5 sends some the
+		// 26.0 library lacks) and leaves empty fields out when writing (26.5 refuses some the library has)
+		builder.register(new JacksonProvider());
 		return builder.build();
 	}
 }

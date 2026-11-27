@@ -8,6 +8,7 @@ import static com.github.tomakehurst.wiremock.client.WireMock.equalToJson;
 import static com.github.tomakehurst.wiremock.client.WireMock.get;
 import static com.github.tomakehurst.wiremock.client.WireMock.getRequestedFor;
 import static com.github.tomakehurst.wiremock.client.WireMock.matchingJsonPath;
+import static com.github.tomakehurst.wiremock.client.WireMock.notContaining;
 import static com.github.tomakehurst.wiremock.client.WireMock.okJson;
 import static com.github.tomakehurst.wiremock.client.WireMock.post;
 import static com.github.tomakehurst.wiremock.client.WireMock.postRequestedFor;
@@ -81,6 +82,26 @@ class KeycloakAdminClientUsersTest {
 						+ "\"firstName\":\"Alice\",\"lastName\":\"Otieno\",\"enabled\":true,"
 						+ "\"requiredActions\":[\"UPDATE_PASSWORD\"]}", false, true))
 				.withRequestBody(matchingJsonPath("$.credentials", absent())));
+	}
+
+	@Test
+	void createSendsNoEmptyFields() {
+		keycloak.stubFor(post(urlEqualTo(USERS_PATH)).willReturn(aResponse().withStatus(201)
+				.withHeader("Location", keycloak.baseUrl() + USERS_PATH + "/" + NEW_ID)));
+
+		client().createUser("alice", "alice@example.org", "Alice", "Otieno");
+
+		// Keycloak 26.5 refuses fields it does not know, even empty ones, e.g. "verifiableCredentials": null
+		keycloak.verify(1, postRequestedFor(urlEqualTo(USERS_PATH)).withRequestBody(notContaining("null")));
+	}
+
+	@Test
+	void errorFieldIsTheReasonWhenThereIsNoErrorMessage() {
+		keycloakUsersAnswer(400, "{\"error\":\"Invalid json representation for UserRepresentation.\"}");
+
+		assertThatThrownBy(() -> client().createUser("alice", "alice@example.org", "Alice", "Otieno"))
+				.isInstanceOfSatisfying(KeycloakRejectedException.class, e -> assertThat(e.getReason())
+						.isEqualTo("Invalid json representation for UserRepresentation."));
 	}
 
 	@Test
