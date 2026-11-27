@@ -106,7 +106,7 @@ class BootstrapAdminTest {
 	@Test
 	void unreachableKeycloakLogsAndKeepsRunning(CapturedOutput output) {
 		when(keycloakClient.findUserByUsername("superadmin")).thenThrow(new KeycloakException(
-				"Keycloak at http://test-keycloak: could not find user superadmin: Connection refused", null));
+				"Keycloak at http://test-keycloak: could not find user superadmin: ", "Connection refused", null));
 
 		assertThatCode(() -> runWith("superadmin")).doesNotThrowAnyException();
 
