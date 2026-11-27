@@ -4,6 +4,7 @@ package org.openphc.cce.admin.audit;
 public enum AuditAction {
 	BOOTSTRAP_ADMIN_LINKED,
 	USER_CREATED,
+	USER_UPDATED,
 	USER_DEACTIVATED,
 	USER_ROLES_UPDATED,
 	ROLE_CREATED,

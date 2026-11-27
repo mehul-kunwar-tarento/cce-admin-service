@@ -28,8 +28,9 @@ public record CreateUserRequest(
 		email = trimAndLowercase(email);
 	}
 
-	// Locale.ROOT: the same result whatever language the server is set to (Turkish would turn I into ı)
-	private static String trimAndLowercase(String text) {
+	// Locale.ROOT: the same result whatever language the server is set to (Turkish would turn I into ı).
+	// Also used by UpdateUserRequest, so both clean the same way
+	static String trimAndLowercase(String text) {
 		if (text == null) {
 			return null;
 		}

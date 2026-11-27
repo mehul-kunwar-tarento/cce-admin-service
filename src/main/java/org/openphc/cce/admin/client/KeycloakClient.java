@@ -24,4 +24,11 @@ public interface KeycloakClient {
 
 	/** Deletes the account. One that is already gone counts as deleted. */
 	void deleteUser(String keycloakId);
+
+	/**
+	 * Changes the account's email and names; everything else (enabled, required actions, roles) stays. Throws
+	 * KeycloakConflictException when another Keycloak account has the email, KeycloakRejectedException when
+	 * Keycloak refuses a value.
+	 */
+	void updateUser(String keycloakId, String email, String firstName, String lastName);
 }

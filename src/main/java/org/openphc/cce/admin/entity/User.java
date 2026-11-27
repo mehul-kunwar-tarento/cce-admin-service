@@ -1,6 +1,7 @@
 package org.openphc.cce.admin.entity;
 
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.UUID;
 
 import jakarta.persistence.Column;
@@ -59,6 +60,16 @@ public class User {
 		this.lastName = lastName;
 		this.status = status;
 		this.facilityScope = facilityScope;
+	}
+
+	/** Applies a profile edit and moves updated_at. Username, status and roles never change here. */
+	public void changeProfile(String email, String firstName, String lastName, String facilityScope) {
+		this.email = email;
+		this.firstName = firstName;
+		this.lastName = lastName;
+		this.facilityScope = facilityScope;
+		// The database keeps microseconds; rounding here makes the reply show the value that is stored
+		this.updatedAt = Instant.now().truncatedTo(ChronoUnit.MICROS);
 	}
 
 	public UUID getId() {

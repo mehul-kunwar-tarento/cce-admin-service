@@ -258,7 +258,8 @@ org/openphc/cce/admin/
 │   ├── RoleService.java                           #   create / delete: TransactionTemplate, commit, then gateway sync (S6)
 │   ├── RoleMenuService.java                       #   Locks the role, checks, saves only the difference, warnings (S7)
 │   ├── UserCreateService.java                     #   Checks, Keycloak create + assign, short TransactionTemplate save; undo once on failure (S8)
-│   ├── UserQueryService.java, UserUpdateService.java  # (S9)
+│   ├── UserQueryService.java                      #   List built from optional conditions (JPQL), LIKE escaped, a page's roles in one query (S9)
+│   ├── UserUpdateService.java                     #   TransactionTemplate: row + flush → Keycloak if needed → audit; half done → USER_UPDATE_FAILED (S9)
 │   ├── UserStatusService.java, UserRolesService.java, PasswordResetService.java  # (S10)
 │   ├── RolePermissionService.java                 #   (S11)
 │   └── MeService.java                             #   (S12)
@@ -272,7 +273,8 @@ org/openphc/cce/admin/
     ├── RoleMenusSnapshot                          #   Audit before/after of a role's menus: {menus: keys A–Z} (S7)
     ├── CreateUserRequest, CreatedUserResponse, UserRoleItem  # (S8); the request trims and lowercases username and email
     ├── UserSnapshot                               #   Audit after of USER_CREATED: the user + role names A–Z (S8)
-    ├── UserResponse, UpdateUserRequest            #   (S9)
+    ├── UserResponse, UpdateUserRequest            #   (S9); the request cleans email and username like create
+    ├── ProfileSnapshot                            #   Audit before/after of USER_UPDATED: {firstName, lastName, email, facilityScope} (S9)
     ├── PermissionRow, RolePermissionsRequest      #   (S11)
     └── MeResponse, MenuNode                       #   (S12)
 ```
@@ -317,6 +319,9 @@ src/test/
     ├── dto/CreateUserRequestTest.java             # Trim + lowercase, limits, roleIds rules, password ignored (S8)
     ├── controller/UserCreateControllerTest.java   # 400 / 409 before Keycloak; happy path, order, audit, roles A–Z (S8)
     ├── controller/UserCreateFailureTest.java      # Real commits: Keycloak 409/400/down; assign or save fails → undo, USER_CREATE_FAILED (S8)
+    ├── controller/UserQueryControllerTest.java    # Paging, q in four fields, literal % and _, AND filters, fields, 404 (S9)
+    ├── controller/UserUpdateControllerTest.java   # Edit, facility-only, same values, 400 / 404 / 409 before Keycloak (S9)
+    ├── controller/UserUpdateFailureTest.java      # Real commits: Keycloak 409/400/down roll back; email race; half done → USER_UPDATE_FAILED (S9)
     └── …                                          # Service tests with KeycloakClient and GatewaySyncClient mocked
 ```
 
