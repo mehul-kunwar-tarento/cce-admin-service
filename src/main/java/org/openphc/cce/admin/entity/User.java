@@ -43,15 +43,22 @@ public class User {
 	protected User() {
 	}
 
-	/** A new user, not saved yet. */
+	/** A new user without a facility scope, not saved yet. */
 	public User(String keycloakId, String username, String email, String firstName, String lastName,
 			UserStatus status) {
+		this(keycloakId, username, email, firstName, lastName, status, null);
+	}
+
+	/** A new user, not saved yet. */
+	public User(String keycloakId, String username, String email, String firstName, String lastName,
+			UserStatus status, String facilityScope) {
 		this.keycloakId = keycloakId;
 		this.username = username;
 		this.email = email;
 		this.firstName = firstName;
 		this.lastName = lastName;
 		this.status = status;
+		this.facilityScope = facilityScope;
 	}
 
 	public UUID getId() {

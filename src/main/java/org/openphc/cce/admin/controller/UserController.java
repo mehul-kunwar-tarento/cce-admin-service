@@ -1,6 +1,8 @@
 package org.openphc.cce.admin.controller;
 
+import org.openphc.cce.admin.api.ApiResponse;
 import org.openphc.cce.admin.dto.CreateUserRequest;
+import org.openphc.cce.admin.dto.CreatedUserResponse;
 import org.openphc.cce.admin.service.UserCreateService;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -22,7 +24,7 @@ public class UserController {
 
 	@PostMapping("/admin/v1/users")
 	@ResponseStatus(HttpStatus.CREATED)
-	public void create(@Valid @RequestBody CreateUserRequest request) {
-		userCreateService.create(request);
+	public ApiResponse<CreatedUserResponse> create(@Valid @RequestBody CreateUserRequest request) {
+		return ApiResponse.of(userCreateService.create(request));
 	}
 }
