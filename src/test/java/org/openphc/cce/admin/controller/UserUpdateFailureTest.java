@@ -2,6 +2,7 @@ package org.openphc.cce.admin.controller;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
@@ -40,9 +41,11 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.openphc.cce.admin.audit.AuditAction;
 import org.openphc.cce.admin.client.KeycloakConflictException;
 import org.openphc.cce.admin.client.KeycloakException;
 import org.openphc.cce.admin.client.KeycloakRejectedException;
+import org.openphc.cce.admin.repository.AuditLogRepository;
 import org.openphc.cce.admin.repository.UserRepository;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
@@ -98,6 +101,10 @@ class UserUpdateFailureTest {
 	// The real repository, made to miss the email check in the race test
 	@MockitoSpyBean
 	private UserRepository userRepository;
+
+	// The real repository, made to fail the USER_UPDATED row after Keycloak has taken the change
+	@MockitoSpyBean
+	private AuditLogRepository auditLogRepository;
 
 	private UUID alice;
 
@@ -168,6 +175,35 @@ class UserUpdateFailureTest {
 		verifyNoInteractions(keycloakClient);
 		assertThat(row(alice)).containsEntry("email", "alice@example.org");
 		assertThat(auditRows("USER_UPDATED")).isZero();
+	}
+
+	@Test
+	void saveFailsAfterKeycloakChangedIsRecorded(CapturedOutput output) throws Exception {
+		// Only the USER_UPDATED row fails; the failure record is written as normal
+		doThrow(new IllegalStateException("database went away")).when(auditLogRepository)
+				.save(argThat(row -> row != null && row.getAction() == AuditAction.USER_UPDATED));
+
+		putNewEmail()
+				.andExpect(status().isBadGateway())
+				.andExpect(jsonPath("$.error.code").value("KEYCLOAK_SYNC_FAILED"))
+				.andExpect(jsonPath("$.error.message").value("Profile only partly applied: Keycloak has the new values,"
+						+ " the user record does not. An operator must fix it."));
+
+		// Keycloak changed once and is not changed back
+		verify(keycloakClient).updateUser("kc-alice", "alice.o@example.org", "Alice", "Otieno");
+		verifyNoMoreInteractions(keycloakClient);
+		// Our row rolled back to the old values
+		assertThat(row(alice)).containsEntry("email", "alice@example.org");
+		assertThat(auditRows("USER_UPDATED")).isZero();
+
+		Map<String, Object> failure = jdbc.queryForMap("SELECT entity_type, entity_id, after->>'keycloakId' AS keycloak_id,"
+				+ " after->>'failedStep' AS failed_step, after->>'error' AS error, after->>'cleanup' AS cleanup"
+				+ " FROM audit_log WHERE action = 'USER_UPDATE_FAILED'");
+		assertThat(failure).containsEntry("entity_type", "USER").containsEntry("entity_id", alice.toString())
+				.containsEntry("keycloak_id", "kc-alice").containsEntry("failed_step", "save user")
+				.containsEntry("error", "database went away")
+				.containsEntry("cleanup", "none — make Keycloak match the user record by hand");
+		assertThat(output).contains("ERROR").contains("USER_UPDATE_FAILED USER " + alice + ": keycloakId=kc-alice");
 	}
 
 	private void keycloakFails(KeycloakException e) {

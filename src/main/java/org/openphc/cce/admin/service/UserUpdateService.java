@@ -55,12 +55,31 @@ public class UserUpdateService {
 	}
 
 	public UserResponse update(UUID id, UpdateUserRequest request) {
-		newTransaction.executeWithoutResult(status -> updateInTransaction(id, request));
+		KeycloakProgress progress = new KeycloakProgress();
+		try {
+			newTransaction.executeWithoutResult(status -> updateInTransaction(id, request, progress));
+		} catch (RuntimeException e) {
+			if (!progress.changed) {
+				// Keycloak was not changed: the rollback left both sides as they were
+				throw e;
+			}
+			// Keycloak has the new values, our row rolled back: record it for an operator, no undo
+			auditWriter.recordFailure(AuditAction.USER_UPDATE_FAILED, ENTITY_TYPE, id.toString(), progress.keycloakId,
+					"save user", e.getMessage(), "none — make Keycloak match the user record by hand");
+			throw new ApiException(HttpStatus.BAD_GATEWAY, ErrorCode.KEYCLOAK_SYNC_FAILED, "Profile only partly"
+					+ " applied: Keycloak has the new values, the user record does not. An operator must fix it.");
+		}
 		// Read after the commit, in the same shape as GET /users/{id}
 		return userQueryService.get(id);
 	}
 
-	private void updateInTransaction(UUID id, UpdateUserRequest request) {
+	/** Set once Keycloak has taken the new values, so a failure after that is known to be half done. */
+	private static class KeycloakProgress {
+		private boolean changed;
+		private String keycloakId;
+	}
+
+	private void updateInTransaction(UUID id, UpdateUserRequest request, KeycloakProgress progress) {
 		Optional<User> found = userRepository.findById(id);
 		if (found.isEmpty()) {
 			throw UserQueryService.notFound(id);
@@ -100,13 +119,13 @@ public class UserUpdateService {
 		}
 
 		if (keycloakFieldsChanged) {
-			updateInKeycloak(user);
+			updateInKeycloak(user, progress);
 		}
 		auditWriter.record(AuditAction.USER_UPDATED, ENTITY_TYPE, id.toString(), before, ProfileSnapshot.of(user));
 	}
 
 	/** Any failure throws, which rolls back the row written above: nothing changes anywhere. */
-	private void updateInKeycloak(User user) {
+	private void updateInKeycloak(User user, KeycloakProgress progress) {
 		try {
 			keycloakClient.updateUser(user.getKeycloakId(), user.getEmail(), user.getFirstName(), user.getLastName());
 		} catch (KeycloakConflictException e) {
@@ -122,6 +141,8 @@ public class UserUpdateService {
 			throw new ApiException(HttpStatus.BAD_GATEWAY, ErrorCode.KEYCLOAK_SYNC_FAILED,
 					"Profile not changed. Keycloak error: " + e.getReason() + ". Nothing was changed.");
 		}
+		progress.changed = true;
+		progress.keycloakId = user.getKeycloakId();
 	}
 
 	private ApiException emailInUse(String email) {
