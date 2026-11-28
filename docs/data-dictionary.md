@@ -308,12 +308,10 @@ Cleaning uses the same helper as `CreateUserRequest`.
 
 ### 4.3 User status and roles bodies (S10)
 
-DTO names confirmed in S10.
-
-| Endpoint | Field | Type | Rule |
-|----------|-------|------|------|
-| `PATCH /users/{id}/status` | `status` | String | §3; not the caller's own status |
-| `PUT /users/{id}/roles` | `roleIds` | List\<UUID\> | Full set; at least one; each must exist; not the caller's own roles |
+| Endpoint | DTO | Field | Type | Rule |
+|----------|-----|-------|------|------|
+| `PATCH /users/{id}/status` | `UserStatusRequest` | `status` | UserStatus | Required; §3; not the caller's own status |
+| `PUT /users/{id}/roles` | `UserRolesRequest` | `roleIds` | List\<UUID\> | Full set; at least one; no `null`; each must exist; repeats count once; not the caller's own roles |
 
 ### 4.4 CreateRoleRequest / UpdateRoleRequest — `/roles` (S6)
 
@@ -591,11 +589,11 @@ Realm roles themselves are created and deleted by the gateway's sync, never by t
 | `ROLE_PERMISSIONS_UPDATED` | `PUT /roles/{id}/permissions` (S11) | the rows | the rows (shows what was added and removed) |
 | `USER_CREATED` | `POST /users` (S8) | null | `id`, `keycloakId`, `username`, `email`, `firstName`, `lastName`, `status` (`ACTIVE`), `facilityScope`, `roles` (names A–Z) — the `BOOTSTRAP_ADMIN_LINKED` shape plus `id` and `facilityScope` (`UserSnapshot`) |
 | `USER_UPDATED` | `PUT /users/{id}` (S9); not written when nothing changed | `{firstName, lastName, email, facilityScope}` (`ProfileSnapshot`) | the same fields after the edit |
-| `USER_ACTIVATED` | `PATCH …/status` (S10) | confirmed in S10 | confirmed in S10 |
-| `USER_DEACTIVATED` | `PATCH …/status` (S10) | confirmed in S10 | confirmed in S10 |
-| `USER_LOCKED` | `PATCH …/status` (S10) | confirmed in S10 | confirmed in S10 |
-| `USER_ROLES_UPDATED` | `PUT …/roles` (S10) | role names | role names |
-| `USER_PASSWORD_RESET` | `POST …/reset-password` (S10) | confirmed in S10 | confirmed in S10 |
+| `USER_ACTIVATED` | `PATCH …/status` (S10) | `{status}` (`StatusSnapshot`) | `{status: "ACTIVE"}` |
+| `USER_DEACTIVATED` | `PATCH …/status` (S10), also LOCKED → INACTIVE | `{status}` | `{status: "INACTIVE"}` |
+| `USER_LOCKED` | `PATCH …/status` (S10), also INACTIVE → LOCKED | `{status}` | `{status: "LOCKED"}` |
+| `USER_ROLES_UPDATED` | `PUT …/roles` (S10); not written for the same set | `{roles: [names A–Z]}` (`RolesSnapshot`) | `{roles: [names A–Z]}` |
+| `USER_PASSWORD_RESET` | `POST …/reset-password` (S10) | null | `{email, actions: ["UPDATE_PASSWORD"]}` (`PasswordResetSnapshot`); never a password |
 
 Requests that change nothing (same set, same status, `POST /roles/{id}/sync`) write no row.
 
@@ -631,6 +629,12 @@ A `USER_UPDATE_FAILED` row (S9) has `entity_id` = the user's id, `failedStep` = 
 written only when Keycloak had already taken the change; a failure before that leaves both sides as
 they were and writes no failure row.
 
+`USER_STATUS_UPDATE_FAILED` and `USER_ROLES_UPDATE_FAILED` (S10) follow the same rule: entity id =
+the user's id, `cleanup` = `none — make Keycloak match the user record by hand`, `failedStep` =
+`save user` for status, and `assign realm roles` / `remove realm roles` / `save user` for roles;
+`error` is the failing call's own message (e.g. `Keycloak at …: could not remove realm roles NURSE
+from user …: HTTP 500`).
+
 ## 10. Log Fields
 
 Fields the log lines carry:
@@ -640,6 +644,7 @@ Fields the log lines carry:
 | ERROR on a 500 (D12) | `ref` = 8-character reference id (also in the response `message`), method + path, full exception |
 | WARN on a gateway sync failure (D3) | `Gateway sync failed for role <id>: POST <url> → status=<status>, body=<full body>`; when the gateway never answered: `status=none, body=none, error=could not connect` or `error=no answer within 10s` |
 | WARN when Keycloak could not create a user (S8) | `User <username> not created: Keycloak at <url>: could not create user <username>: <reason>` — nothing half done, so no ERROR and no audit row |
+| WARN when a status, roles or reset call to Keycloak failed with nothing half done (S10) | `Status of user <username> not changed: …`, `Roles of user <username> not changed: …`, `Password reset email for user <username> not sent: …` (the Keycloak message) |
 | WARN when Keycloak could not update a user (S9) | `User <username> not updated: Keycloak at <url>: could not update user <keycloakId>: <reason>` — the row rolled back, nothing half done |
 | ERROR on a half-done Keycloak/DB change (D8) | Written by `AuditWriter.recordFailure`: `<action> <entityType> <entityId>: keycloakId=…, failedStep=…, error=…, cleanup=…`; if the audit row can't be written, a second line `Audit row for <action> <entityType> <entityId> not written; the line above is the only record` with the exception |
 

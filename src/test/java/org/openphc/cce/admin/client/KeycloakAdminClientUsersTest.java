@@ -43,6 +43,17 @@ class KeycloakAdminClientUsersTest {
 	private static final String ROLE_MAPPINGS_PATH = USERS_PATH + "/" + NEW_ID + "/role-mappings/realm";
 	private static final String AVAILABLE_PATH = ROLE_MAPPINGS_PATH + "/available";
 	// As the local Keycloak listed them for a new user: its defaults plus the realm's own roles
+	// What a new user holds: only Keycloak's own default role
+	private static final String HELD_DEFAULT_ONLY =
+			"[{\"id\":\"62603b14-0000-0000-0000-000000000009\",\"name\":\"default-roles-cce\",\"composite\":true,\"clientRole\":false}]";
+	// A user who holds NURSE; NURSE is then missing from "available"
+	private static final String HELD_NURSE = "["
+			+ "{\"id\":\"62603b14-0000-0000-0000-000000000009\",\"name\":\"default-roles-cce\",\"composite\":true,\"clientRole\":false},"
+			+ "{\"id\":\"62603b14-0000-0000-0000-000000000003\",\"name\":\"NURSE\",\"composite\":false,\"clientRole\":false}"
+			+ "]";
+	private static final String AVAILABLE_WITHOUT_NURSE = "["
+			+ "{\"id\":\"62603b14-0000-0000-0000-000000000002\",\"name\":\"SUPER_ADMIN\",\"composite\":false,\"clientRole\":false}"
+			+ "]";
 	private static final String AVAILABLE = "["
 			+ "{\"id\":\"62603b14-0000-0000-0000-000000000001\",\"name\":\"offline_access\",\"composite\":false,\"clientRole\":false},"
 			+ "{\"id\":\"62603b14-0000-0000-0000-000000000002\",\"name\":\"SUPER_ADMIN\",\"composite\":false,\"clientRole\":false},"
@@ -169,6 +180,7 @@ class KeycloakAdminClientUsersTest {
 	@Test
 	void roleMissingInKeycloakIsNamedAndNothingIsGiven() {
 		keycloak.stubFor(get(urlEqualTo(AVAILABLE_PATH)).willReturn(okJson(AVAILABLE)));
+		keycloak.stubFor(get(urlEqualTo(ROLE_MAPPINGS_PATH)).willReturn(okJson(HELD_DEFAULT_ONLY)));
 
 		assertThatThrownBy(() -> client().assignRealmRoles(NEW_ID, List.of("NURSE", "PHARMACIST")))
 				.isExactlyInstanceOf(KeycloakException.class)
@@ -264,6 +276,112 @@ class KeycloakAdminClientUsersTest {
 				.isExactlyInstanceOf(KeycloakException.class)
 				.satisfies(e -> assertThat(((KeycloakException) e).getReason()).isEqualTo("User not found"));
 		keycloak.verify(1, putRequestedFor(urlEqualTo(USER_PATH)));
+	}
+
+	// ---- assignRealmRoles: roles the user already has ----
+
+	@Test
+	void roleTheUserAlreadyHasIsSkipped() {
+		keycloak.stubFor(get(urlEqualTo(AVAILABLE_PATH)).willReturn(okJson(AVAILABLE_WITHOUT_NURSE)));
+		keycloak.stubFor(get(urlEqualTo(ROLE_MAPPINGS_PATH)).willReturn(okJson(HELD_NURSE)));
+		keycloak.stubFor(post(urlEqualTo(ROLE_MAPPINGS_PATH)).willReturn(aResponse().withStatus(204)));
+
+		client().assignRealmRoles(NEW_ID, List.of("NURSE", "SUPER_ADMIN"));
+
+		keycloak.verify(1, postRequestedFor(urlEqualTo(ROLE_MAPPINGS_PATH)).withRequestBody(equalToJson(
+				"[{\"id\":\"62603b14-0000-0000-0000-000000000002\",\"name\":\"SUPER_ADMIN\"}]", false, true)));
+	}
+
+	@Test
+	void whenEveryRoleIsAlreadyThereNothingIsGiven() {
+		keycloak.stubFor(get(urlEqualTo(AVAILABLE_PATH)).willReturn(okJson(AVAILABLE_WITHOUT_NURSE)));
+		keycloak.stubFor(get(urlEqualTo(ROLE_MAPPINGS_PATH)).willReturn(okJson(HELD_NURSE)));
+
+		client().assignRealmRoles(NEW_ID, List.of("NURSE"));
+
+		keycloak.verify(0, postRequestedFor(urlEqualTo(ROLE_MAPPINGS_PATH)));
+	}
+
+	// ---- removeRealmRoles ----
+
+	@Test
+	void heldRolesAreRemovedInOneCall() {
+		keycloak.stubFor(get(urlEqualTo(ROLE_MAPPINGS_PATH)).willReturn(okJson(HELD_NURSE)));
+		keycloak.stubFor(delete(urlEqualTo(ROLE_MAPPINGS_PATH)).willReturn(aResponse().withStatus(204)));
+
+		client().removeRealmRoles(NEW_ID, List.of("NURSE", "PHARMACIST"));
+
+		// PHARMACIST is not held, so only NURSE is sent
+		keycloak.verify(1, deleteRequestedFor(urlEqualTo(ROLE_MAPPINGS_PATH)).withRequestBody(equalToJson(
+				"[{\"id\":\"62603b14-0000-0000-0000-000000000003\",\"name\":\"NURSE\"}]", false, true)));
+	}
+
+	@Test
+	void rolesNotHeldAreAlreadyRemoved() {
+		keycloak.stubFor(get(urlEqualTo(ROLE_MAPPINGS_PATH)).willReturn(okJson(HELD_DEFAULT_ONLY)));
+
+		client().removeRealmRoles(NEW_ID, List.of("NURSE"));
+
+		keycloak.verify(0, deleteRequestedFor(urlEqualTo(ROLE_MAPPINGS_PATH)));
+	}
+
+	@Test
+	void failedRemoveIsAKeycloakException() {
+		keycloak.stubFor(get(urlEqualTo(ROLE_MAPPINGS_PATH)).willReturn(okJson(HELD_NURSE)));
+		keycloak.stubFor(delete(urlEqualTo(ROLE_MAPPINGS_PATH)).willReturn(aResponse().withStatus(500)));
+
+		assertThatThrownBy(() -> client().removeRealmRoles(NEW_ID, List.of("NURSE")))
+				.isExactlyInstanceOf(KeycloakException.class)
+				.hasMessageStartingWith("Keycloak at " + keycloak.baseUrl() + ": could not remove realm roles NURSE from user "
+						+ NEW_ID + ": ");
+		keycloak.verify(1, deleteRequestedFor(urlEqualTo(ROLE_MAPPINGS_PATH)));
+	}
+
+	// ---- setEnabled ----
+
+	@Test
+	void setEnabledSendsOnlyTheFlag() {
+		keycloak.stubFor(put(urlEqualTo(USER_PATH)).willReturn(aResponse().withStatus(204)));
+
+		client().setEnabled(NEW_ID, false);
+
+		keycloak.verify(1, putRequestedFor(urlEqualTo(USER_PATH))
+				.withRequestBody(equalToJson("{\"enabled\":false}", false, false)));
+	}
+
+	@Test
+	void setEnabledOnAnUnknownUserIsAFailure() {
+		keycloakUserAnswers(404, "{\"error\":\"User not found\"}");
+
+		assertThatThrownBy(() -> client().setEnabled(NEW_ID, true))
+				.isExactlyInstanceOf(KeycloakException.class)
+				.hasMessage("Keycloak at " + keycloak.baseUrl() + ": could not set enabled=true for user " + NEW_ID
+						+ ": User not found");
+	}
+
+	// ---- sendUpdatePasswordEmail ----
+
+	@Test
+	void resetAsksKeycloakToEmailUpdatePassword() {
+		keycloak.stubFor(put(urlEqualTo(USER_PATH + "/execute-actions-email")).willReturn(aResponse().withStatus(204)));
+
+		client().sendUpdatePasswordEmail(NEW_ID);
+
+		keycloak.verify(1, putRequestedFor(urlEqualTo(USER_PATH + "/execute-actions-email"))
+				.withRequestBody(equalToJson("[\"UPDATE_PASSWORD\"]", false, false)));
+	}
+
+	@Test
+	void resetWithoutAMailServerGivesKeycloaksReason() {
+		keycloak.stubFor(put(urlEqualTo(USER_PATH + "/execute-actions-email")).willReturn(aResponse().withStatus(500)
+				.withHeader("Content-Type", "application/json")
+				.withBody("{\"errorMessage\":\"Failed to send execute actions email: Invalid sender address 'null'.\"}")));
+
+		assertThatThrownBy(() -> client().sendUpdatePasswordEmail(NEW_ID))
+				.isExactlyInstanceOf(KeycloakException.class)
+				.satisfies(e -> assertThat(((KeycloakException) e).getReason())
+						.isEqualTo("Failed to send execute actions email: Invalid sender address 'null'."));
+		keycloak.verify(1, putRequestedFor(urlEqualTo(USER_PATH + "/execute-actions-email")));
 	}
 
 	private void keycloakUserAnswers(int status, String body) {

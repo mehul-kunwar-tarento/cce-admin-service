@@ -19,7 +19,10 @@ public interface KeycloakClient {
 	 */
 	String createUser(String username, String email, String firstName, String lastName);
 
-	/** Gives the user these realm roles in one call. Throws KeycloakException naming any role Keycloak lacks. */
+	/**
+	 * Gives the user these realm roles in one call; a role the user already has is skipped. Throws
+	 * KeycloakException naming any role Keycloak lacks.
+	 */
 	void assignRealmRoles(String keycloakId, List<String> roleNames);
 
 	/** Deletes the account. One that is already gone counts as deleted. */
@@ -31,4 +34,13 @@ public interface KeycloakClient {
 	 * Keycloak refuses a value.
 	 */
 	void updateUser(String keycloakId, String email, String firstName, String lastName);
+
+	/** Opens (true) or closes (false) the account; everything else stays. */
+	void setEnabled(String keycloakId, boolean enabled);
+
+	/** Takes these realm roles away in one call. A role the user doesn't have counts as removed. */
+	void removeRealmRoles(String keycloakId, List<String> roleNames);
+
+	/** Has Keycloak email the user a link to set a new password (required action UPDATE_PASSWORD). */
+	void sendUpdatePasswordEmail(String keycloakId);
 }

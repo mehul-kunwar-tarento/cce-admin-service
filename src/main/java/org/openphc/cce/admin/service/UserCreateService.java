@@ -1,13 +1,8 @@
 package org.openphc.cce.admin.service;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Comparator;
-import java.util.HashSet;
-import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Set;
-import java.util.UUID;
 
 import org.openphc.cce.admin.audit.AuditAction;
 import org.openphc.cce.admin.audit.AuditWriter;
@@ -24,7 +19,6 @@ import org.openphc.cce.admin.entity.UserRole;
 import org.openphc.cce.admin.entity.UserStatus;
 import org.openphc.cce.admin.error.ApiException;
 import org.openphc.cce.admin.error.ErrorCode;
-import org.openphc.cce.admin.repository.RoleRepository;
 import org.openphc.cce.admin.repository.UserRepository;
 import org.openphc.cce.admin.repository.UserRoleRepository;
 import org.slf4j.Logger;
@@ -45,17 +39,17 @@ public class UserCreateService {
 
 	private static final String ENTITY_TYPE = "USER";
 
-	private final RoleRepository roleRepository;
+	private final RoleFinder roleFinder;
 	private final UserRepository userRepository;
 	private final UserRoleRepository userRoleRepository;
 	private final AuditWriter auditWriter;
 	private final KeycloakClient keycloakClient;
 	private final TransactionTemplate newTransaction;
 
-	public UserCreateService(RoleRepository roleRepository, UserRepository userRepository,
+	public UserCreateService(RoleFinder roleFinder, UserRepository userRepository,
 			UserRoleRepository userRoleRepository, AuditWriter auditWriter, KeycloakClient keycloakClient,
 			PlatformTransactionManager transactionManager) {
-		this.roleRepository = roleRepository;
+		this.roleFinder = roleFinder;
 		this.userRepository = userRepository;
 		this.userRoleRepository = userRoleRepository;
 		this.auditWriter = auditWriter;
@@ -65,7 +59,7 @@ public class UserCreateService {
 	}
 
 	public CreatedUserResponse create(CreateUserRequest request) {
-		List<Role> roles = findRoles(request.roleIds());
+		List<Role> roles = roleFinder.findAll(request.roleIds(), "Nothing was created.");
 		if (userRepository.existsByEmailInAnyCase(request.email())) {
 			throw new ApiException(HttpStatus.CONFLICT, ErrorCode.EMAIL_IN_USE,
 					"Email " + request.email() + " is already used by another user.");
@@ -163,31 +157,5 @@ public class UserCreateService {
 			names.add(role.getName());
 		}
 		return names;
-	}
-
-	/** The roles of these ids, each once. Unknown ids → 400 naming every one of them. */
-	private List<Role> findRoles(List<UUID> roleIds) {
-		// A set: the same id twice still means that one role
-		Set<UUID> wanted = new LinkedHashSet<>(roleIds);
-		List<Role> found = roleRepository.findAllById(wanted);
-		if (found.size() == wanted.size()) {
-			// A copy the caller may sort
-			return new ArrayList<>(found);
-		}
-
-		Set<UUID> foundIds = new HashSet<>();
-		for (Role role : found) {
-			foundIds.add(role.getId());
-		}
-		// Sorted as text, so the message is the same every time
-		List<String> unknown = new ArrayList<>();
-		for (UUID id : wanted) {
-			if (!foundIds.contains(id)) {
-				unknown.add(id.toString());
-			}
-		}
-		Collections.sort(unknown);
-		throw new ApiException(HttpStatus.BAD_REQUEST, ErrorCode.VALIDATION_ERROR,
-				"Unknown role id(s): " + String.join(", ", unknown) + ". Nothing was created.");
 	}
 }

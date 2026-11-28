@@ -53,7 +53,7 @@ cce-admin-service/
 │   ├── keycloak/
 │   │   └── cce-realm-local.json  # Realm "cce", imported when Keycloak starts
 │   ├── create-superadmin.sh      # Creates the test user superadmin
-│   ├── get-token.sh              # Prints a token for superadmin
+│   ├── get-token.sh              # Prints a token for superadmin, or for another user: get-token.sh <user> <password>
 │   └── FakeGateway.java          # Stand-in gateway for local demos (S6, §10.1)
 ├── docs/                         # This guide and the other design docs
 ├── build.gradle, settings.gradle          # Gradle build (S1)
@@ -225,6 +225,11 @@ TOKEN=$(./local/get-token.sh)
 
 The script logs in the way a browser does (login page → code → token), because only that kind of
 login puts `auth_time` in the token (see Troubleshooting). The token is valid for 5 minutes.
+
+For another user, e.g. to show that a deactivated user's token gets 403:
+`./local/get-token.sh alice '<password>'`. Users made by `POST /users` have no password, so for a
+local demo set one by hand in Keycloak's admin console (Users → alice → Credentials → Set password,
+Temporary off) and remove the pending "Update Password" action. Never through the admin service.
 
 To read what is inside:
 

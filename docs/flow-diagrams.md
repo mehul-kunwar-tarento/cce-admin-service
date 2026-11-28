@@ -485,6 +485,13 @@ sequenceDiagram
 
 No undo here: reverting could overwrite something that changed in the meantime, so a person fixes
 it (D8). Deactivation keeps `user_roles`, so re-activation restores the same access (B-34).
+
+As built (S10): both endpoints first lock the user row (`findLockedById`), so a second request for the
+same user waits and then finds nothing to do. Our rows are written and flushed **before** the Keycloak
+calls (the diagram's DB steps); the audit row is written last. Status calls `setEnabled` only when the
+account opens or closes (INACTIVE ↔ LOCKED is a label change). Roles give added roles first, then
+remove taken ones; a remove failing after a successful assign, or our save failing after Keycloak
+changed, records `USER_ROLES_UPDATE_FAILED` with the step.
 `PUT /users/{id}` (S9) follows the same order with one Keycloak call, `updateUser`, made only when
 the email or a name changed; the same values return 200 before the transaction writes anything. A
 taken email is found at the row write (flush), before Keycloak. When our side fails after Keycloak

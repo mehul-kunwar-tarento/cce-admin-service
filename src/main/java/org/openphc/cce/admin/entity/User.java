@@ -72,6 +72,12 @@ public class User {
 		this.updatedAt = Instant.now().truncatedTo(ChronoUnit.MICROS);
 	}
 
+	/** Applies a status change and moves updated_at. */
+	public void changeStatus(UserStatus status) {
+		this.status = status;
+		this.updatedAt = Instant.now().truncatedTo(ChronoUnit.MICROS);
+	}
+
 	public UUID getId() {
 		return id;
 	}

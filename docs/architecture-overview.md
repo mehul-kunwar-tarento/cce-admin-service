@@ -260,7 +260,10 @@ org/openphc/cce/admin/
 │   ├── UserCreateService.java                     #   Checks, Keycloak create + assign, short TransactionTemplate save; undo once on failure (S8)
 │   ├── UserQueryService.java                      #   List built from optional conditions (JPQL), LIKE escaped, a page's roles in one query (S9)
 │   ├── UserUpdateService.java                     #   TransactionTemplate: row + flush → Keycloak if needed → audit; half done → USER_UPDATE_FAILED (S9)
-│   ├── UserStatusService.java, UserRolesService.java, PasswordResetService.java  # (S10)
+│   ├── UserStatusService.java                     #   Row lock, own/same checks, setEnabled only on open/close, half done → USER_STATUS_UPDATE_FAILED (S10)
+│   ├── UserRolesService.java                      #   Row lock, diff, assign then remove, half done → USER_ROLES_UPDATE_FAILED with the step (S10)
+│   ├── PasswordResetService.java                  #   ACTIVE only, Keycloak execute-actions email, audit (S10)
+│   ├── RoleFinder.java                            #   Roles by id, each once, unknown ids named (S8 create, S10 roles)
 │   ├── RolePermissionService.java                 #   (S11)
 │   └── MeService.java                             #   (S12)
 │
@@ -275,6 +278,8 @@ org/openphc/cce/admin/
     ├── UserSnapshot                               #   Audit after of USER_CREATED: the user + role names A–Z (S8)
     ├── UserResponse, UpdateUserRequest            #   (S9); the request cleans email and username like create
     ├── ProfileSnapshot                            #   Audit before/after of USER_UPDATED: {firstName, lastName, email, facilityScope} (S9)
+    ├── UserStatusRequest, UserRolesRequest        #   (S10)
+    ├── StatusSnapshot, RolesSnapshot, PasswordResetSnapshot  # Audit of status {status}, roles {roles A–Z}, reset {email, actions} (S10)
     ├── PermissionRow, RolePermissionsRequest      #   (S11)
     └── MeResponse, MenuNode                       #   (S12)
 ```
@@ -322,6 +327,12 @@ src/test/
     ├── controller/UserQueryControllerTest.java    # Paging, q in four fields, literal % and _, AND filters, fields, 404 (S9)
     ├── controller/UserUpdateControllerTest.java   # Edit, facility-only, same values, 400 / 404 / 409 before Keycloak (S9)
     ├── controller/UserUpdateFailureTest.java      # Real commits: Keycloak 409/400/down roll back; email race; half done → USER_UPDATE_FAILED (S9)
+    ├── controller/UserStatusControllerTest.java   # Deactivate → next request 403, activate, lock, INACTIVE→LOCKED without Keycloak, guards (S10)
+    ├── controller/UserStatusFailureTest.java      # Real commits: Keycloak failure rolls back; half done → USER_STATUS_UPDATE_FAILED (S10)
+    ├── controller/UserRolesControllerTest.java    # Diff, assign then remove, same set, INACTIVE users, SUPER_ADMIN, guards (S10)
+    ├── controller/UserRolesFailureTest.java       # Real commits: first call fails; remove after assign or save fails → USER_ROLES_UPDATE_FAILED (S10)
+    ├── controller/UserRolesRaceTest.java          # 10 identical role changes at once on a real server: all 200, one change (S10)
+    ├── controller/PasswordResetControllerTest.java  # ACTIVE only, 204, audit without password, Keycloak failure → 502 (S10)
     └── …                                          # Service tests with KeycloakClient and GatewaySyncClient mocked
 ```
 
