@@ -370,18 +370,22 @@ Change status, mirrored to Keycloak (B-34, S10).
 | → `INACTIVE` | `enabled = false` | kept (re-activation restores access) | `USER_DEACTIVATED` |
 | → `LOCKED` | `enabled = false` (same as INACTIVE; only the label differs) | kept | `USER_LOCKED` |
 | → `ACTIVE` | `enabled = true` | unchanged | `USER_ACTIVATED` |
+| `INACTIVE` ↔ `LOCKED` | **not called** (the account is closed either way) | kept | `USER_LOCKED` / `USER_DEACTIVATED` |
 
+Keycloak is called only when the account opens or closes. Audit before/after: `{status}`. The user
+row is locked first, so a second change of the same user waits and then sees the first one's result.
 An INACTIVE or LOCKED user's still-valid token gets 403 `FORBIDDEN` from this service on the next
-request (B-12). Users are never hard-deleted.
+request (B-12). Users are never hard-deleted. Our LOCKED is an admin's label, not Keycloak's
+temporary brute-force lock.
 
 | Status | Code | When |
 |--------|------|------|
-| 200 | — | Changed. Body confirmed in S10 |
+| 200 | — | Changed. Body = the whole user, as `GET /users/{id}` |
 | 200 | — | Same status as now → no Keycloak call, no audit |
-| 400 | `VALIDATION_ERROR` | Unknown status value; caller changing their own status |
+| 400 | `VALIDATION_ERROR` | Status missing (`Invalid request: status must not be null.`) or not one of the three (bad JSON message); caller changing their own status (`You can't change your own status. Ask another administrator.`) |
 | 404 | `USER_NOT_FOUND` | Unknown id |
-| 502 | `KEYCLOAK_SYNC_FAILED` | Keycloak call failed → nothing changed, no audit |
-| 502 | `KEYCLOAK_SYNC_FAILED` | Commit failed after Keycloak → `USER_STATUS_UPDATE_FAILED` recorded |
+| 502 | `KEYCLOAK_SYNC_FAILED` | Keycloak call failed → nothing changed, no audit, WARN log |
+| 502 | `KEYCLOAK_SYNC_FAILED` | Our side failed after Keycloak changed → `USER_STATUS_UPDATE_FAILED` recorded, no undo |
 
 #### PUT /users/{id}/roles
 
@@ -390,16 +394,20 @@ Replace the user's role set (B-35, S10; full-set replace §2.3).
 **Request body:** `{ "roleIds": ["…", "…"] }`
 
 The service assigns in Keycloak only the roles added and removes only the roles taken away; the
-rest are untouched. Example: `[A, B]` → `[B, C]` assigns C, removes A.
+rest are untouched. Example: `[A, B]` → `[B, C]` assigns C, removes A. Added roles are given first,
+so a change left half done means too many roles for a moment, never too few. A role the user already
+has in Keycloak is skipped; removing one Keycloak doesn't have counts as done. Repeated ids count
+once. Works for INACTIVE and LOCKED users; `SUPER_ADMIN` is given and taken like any role. The user
+row is locked first: ten identical requests at once give one change and ten 200s.
+Audit before/after: `{roles: [names A–Z]}`.
 
 | Status | Code | When |
 |--------|------|------|
-| 200 | — | Changed; audit `USER_ROLES_UPDATED` with role names before/after. Body confirmed in S10 |
-| 200 | — | Same set as now → no Keycloak call, no audit |
-| 400 | `VALIDATION_ERROR` | `[]`, unknown `roleId`, or the caller's own roles |
+| 200 | — | Changed (or the same set: nothing done, no audit). Body = the whole user, as `GET /users/{id}` |
+| 400 | `VALIDATION_ERROR` | `[]` or a `null` item; unknown `roleId` (`Unknown role id(s): <ids>. Nothing was changed.`); the caller's own roles (`You can't change your own roles. Ask another administrator.`) |
 | 404 | `USER_NOT_FOUND` | Unknown id |
-| 502 | `KEYCLOAK_SYNC_FAILED` | First Keycloak call failed → nothing changed, no audit |
-| 502 | `KEYCLOAK_SYNC_FAILED` | A later Keycloak call failed after an earlier one succeeded → `user_roles` unchanged, `USER_ROLES_UPDATE_FAILED` recorded |
+| 502 | `KEYCLOAK_SYNC_FAILED` | First Keycloak call failed → nothing changed, no audit, WARN log |
+| 502 | `KEYCLOAK_SYNC_FAILED` | Assign succeeded, then remove or our save failed → `user_roles` unchanged, `USER_ROLES_UPDATE_FAILED` recorded with the failed step |
 
 #### POST /users/{id}/reset-password
 
@@ -408,10 +416,14 @@ No password ever passes through the service (B-36).
 
 | Status | Code | When |
 |--------|------|------|
-| 204 | — | Email triggered; audit `USER_PASSWORD_RESET` |
-| 400 | `VALIDATION_ERROR` | User not ACTIVE — `Activate the user first.` |
+| 204 | — | Email triggered; audit `USER_PASSWORD_RESET` `{email, actions: ["UPDATE_PASSWORD"]}` |
+| 400 | `VALIDATION_ERROR` | User not ACTIVE — `Activate the user first.` (Keycloak not called) |
 | 404 | `USER_NOT_FOUND` | Unknown id |
-| 502 | `KEYCLOAK_SYNC_FAILED` | Keycloak call failed; no audit |
+| 502 | `KEYCLOAK_SYNC_FAILED` | Keycloak call failed; no audit; WARN log |
+
+An admin may reset their own password. No link lifespan or redirect is passed: Keycloak's realm
+defaults apply. If the audit insert fails after Keycloak sent the email, the answer is 500; nothing
+is half done between the two systems.
 
 > Locally, S0's Keycloak has no mail server, so a real reset returns 502. Tests mock Keycloak;
 > real email delivery is not tested (S10 rule h).
@@ -996,9 +1008,9 @@ The message always says what **was** saved, so the caller knows what to retry.
 | Update profile, Keycloak failed | `Profile not changed. Keycloak error: <reason>. Nothing was changed.` |
 | Update profile, commit failed after Keycloak | `Profile only partly applied: Keycloak has the new values, the user record does not. An operator must fix it.` |
 | Status / roles, first Keycloak call failed | `<Status\|Roles> not changed. Keycloak error: <reason>. Nothing was changed.` |
-| Status, half-done | `Status change only partly applied: <which side succeeded>. Keycloak and the user record now differ; an operator must fix it.` |
+| Status, half-done | `Status change only partly applied: Keycloak account <enabled\|disabled>, user record still <old status>. Keycloak and the user record now differ; an operator must fix it.` |
 | Roles, half-done | `Role change only partly applied in Keycloak. Keycloak and the user record now differ; an operator must fix it.` |
-| Reset password, Keycloak failed | Text confirmed in S10 |
+| Reset password, Keycloak failed | `Password reset email not sent. Keycloak error: <reason>.` — locally `Failed to send execute actions email: Invalid sender address 'null'. …` (no mail server) |
 
 Every half-done case also writes an ERROR log and a `*_FAILED` audit row.
 
@@ -1090,9 +1102,9 @@ Each method is called at most once per request.
 | `assignRealmRoles(keycloakId, names)` | `GET …/users/{id}/role-mappings/realm/available`, picks the roles by name (a missing one → `Keycloak has no realm role <NAME>`, nothing given), then one `POST …/users/{id}/role-mappings/realm`. The service account may not read a role by name (403), but may list a user's available roles | S8 | `POST /users`, `PUT /users/{id}/roles` |
 | `deleteUser(keycloakId)` | `DELETE …/users/{id}` → 204; 404 counts as deleted (create-user undo only) | S8 | `POST /users` |
 | `updateUser(keycloakId, email, firstName, lastName)` | `PUT …/users/{id}` with only those three fields → 204; Keycloak keeps every other field. The library throws on an error status; the answer is read the same way as for create: 409 → `KeycloakConflictException`, 400 → `KeycloakRejectedException`, else (e.g. 404 `User not found`) → `KeycloakException` | S9 | `PUT /users/{id}` |
-| `setEnabled(keycloakId, enabled)` | Enables / disables the account | S10 | `PATCH /users/{id}/status` |
-| `removeRealmRoles(keycloakId, names)` | Removes realm-role mappings | S10 | `PUT /users/{id}/roles` |
-| `sendUpdatePasswordEmail(keycloakId)` | Execute-actions email with `UPDATE_PASSWORD` | S10 | `POST /users/{id}/reset-password` |
+| `setEnabled(keycloakId, enabled)` | `PUT …/users/{id}` with only `{"enabled": …}` → 204; every other field kept. 404 → `User not found` | S10 | `PATCH /users/{id}/status` |
+| `removeRealmRoles(keycloakId, names)` | `GET …/users/{id}/role-mappings/realm` (the roles held), picks the names, one `DELETE …/role-mappings/realm`; none held → no call | S10 | `PUT /users/{id}/roles` |
+| `sendUpdatePasswordEmail(keycloakId)` | `PUT …/users/{id}/execute-actions-email` with `["UPDATE_PASSWORD"]` → 204; no mail server → 500 `Failed to send execute actions email: …` | S10 | `POST /users/{id}/reset-password` |
 
 `…` = `{KEYCLOAK_BASE_URL}/admin/realms/{KEYCLOAK_REALM}`. JSON goes through the library's own
 provider (`org.keycloak.admin.client.JacksonProvider`): it skips fields the 26.0 library doesn't know
@@ -1100,7 +1112,8 @@ when reading Keycloak 26.5's answers, and leaves empty fields out when writing �
 fields it doesn't know, even empty ones such as `verifiableCredentials` (found in S8's real run).
 Keycloak's error text is read from `errorMessage`, else `error`. Every `KeycloakException` carries the
 message (URL, step, reason) for logs and the bare reason (`getReason()`) for the caller's message.
-Exact Keycloak REST paths behind the S10 methods are confirmed in that sub-task.
+`assignRealmRoles` also reads the roles held when a name is missing from "available", and skips the
+ones the user already has (S10).
 
 ---
 

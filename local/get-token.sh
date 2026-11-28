@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Prints an access token for the test user "superadmin" (SPEC S0).
+# Prints an access token for the test user "superadmin" (SPEC S0), or for another local user.
 # Logs in the way a browser does (authorization code flow) through the public client
 # "cce-admin-local", so the token has auth_time (SPEC D7). In Keycloak 26.5.4 a
 # password-grant token has no auth_time.
@@ -14,8 +14,11 @@
 #   4. swap the code for a token
 #
 # Usage (from the repo root):
-#   ./local/get-token.sh                 # prints the token
+#   ./local/get-token.sh                 # prints the token of superadmin (password from .env)
 #   TOKEN=$(./local/get-token.sh)        # keeps it in a variable for curl
+#   ./local/get-token.sh alice 'Pass1!'  # another user, e.g. to show a deactivated user's 403.
+#                                        # Their password is set by hand in Keycloak's admin console,
+#                                        # never through the admin service. Local demos only.
 #
 # Only the token goes to stdout; every error goes to stderr.
 
@@ -24,7 +27,8 @@ set -euo pipefail
 KEYCLOAK_URL=http://localhost:8180
 REALM=cce
 CLIENT_ID=cce-admin-local
-USERNAME=superadmin
+# Default: superadmin with the password from .env; an argument pair picks another user
+USERNAME=${1:-superadmin}
 REDIRECT_URI=http://localhost:9999/callback
 
 # Run from the repo root, so .env is found wherever the script is called from
@@ -39,9 +43,17 @@ set -a        # every variable read from .env is exported
 . ./.env
 set +a
 
-if [ -z "${SUPERADMIN_PASSWORD:-}" ]; then
-  echo "ERROR: SUPERADMIN_PASSWORD is empty in .env" >&2
-  exit 1
+PASSWORD=${2:-}
+if [ -z "$PASSWORD" ]; then
+  if [ "$USERNAME" != "superadmin" ]; then
+    echo "ERROR: give the password of $USERNAME as the second argument" >&2
+    exit 1
+  fi
+  if [ -z "${SUPERADMIN_PASSWORD:-}" ]; then
+    echo "ERROR: SUPERADMIN_PASSWORD is empty in .env" >&2
+    exit 1
+  fi
+  PASSWORD=$SUPERADMIN_PASSWORD
 fi
 
 # Keycloak remembers the login between steps 1 and 2 with a cookie, like a browser.
@@ -68,14 +80,14 @@ fi
 # 2. Submit username and password; do not follow the redirect, only read where it points
 REDIRECT=$(curl -s -c "$COOKIES" -b "$COOKIES" -o /dev/null -w '%{redirect_url}' -X POST "$FORM_URL" \
   -d username="$USERNAME" \
-  --data-urlencode password="$SUPERADMIN_PASSWORD")
+  --data-urlencode password="$PASSWORD")
 
 # 3. Take the code from the redirect address: …/callback?…&code=CODE&…
 CODE=$(echo "$REDIRECT" | sed -n 's/.*[?&]code=\([^&]*\).*/\1/p')
 
 if [ -z "$CODE" ]; then
-  echo "ERROR: login failed for $USERNAME (wrong password, or user missing)." >&2
-  echo "Run ./local/create-superadmin.sh and check SUPERADMIN_PASSWORD in .env" >&2
+  echo "ERROR: login failed for $USERNAME (wrong password, user missing or disabled, or a required action" >&2
+  echo "such as Update Password still pending). For superadmin: ./local/create-superadmin.sh and .env" >&2
   exit 1
 fi
 
