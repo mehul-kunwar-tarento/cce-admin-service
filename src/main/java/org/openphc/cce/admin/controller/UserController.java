@@ -14,6 +14,7 @@ import org.openphc.cce.admin.dto.UserStatusRequest;
 import org.openphc.cce.admin.entity.UserStatus;
 import org.openphc.cce.admin.service.UserCreateService;
 import org.openphc.cce.admin.security.CurrentUser;
+import org.openphc.cce.admin.service.PasswordResetService;
 import org.openphc.cce.admin.service.UserQueryService;
 import org.openphc.cce.admin.service.UserRolesService;
 import org.openphc.cce.admin.service.UserStatusService;
@@ -42,15 +43,23 @@ public class UserController {
 	private final UserUpdateService userUpdateService;
 	private final UserStatusService userStatusService;
 	private final UserRolesService userRolesService;
+	private final PasswordResetService passwordResetService;
 
 	public UserController(UserCreateService userCreateService, UserQueryService userQueryService,
 			UserUpdateService userUpdateService, UserStatusService userStatusService,
-			UserRolesService userRolesService) {
+			UserRolesService userRolesService, PasswordResetService passwordResetService) {
 		this.userCreateService = userCreateService;
 		this.userQueryService = userQueryService;
 		this.userUpdateService = userUpdateService;
 		this.userStatusService = userStatusService;
 		this.userRolesService = userRolesService;
+		this.passwordResetService = passwordResetService;
+	}
+
+	@PostMapping("/admin/v1/users/{id}/reset-password")
+	@ResponseStatus(HttpStatus.NO_CONTENT)
+	public void resetPassword(@PathVariable UUID id) {
+		passwordResetService.reset(id);
 	}
 
 	@PutMapping("/admin/v1/users/{id}/roles")
