@@ -148,6 +148,35 @@ public class KeycloakAdminClient implements KeycloakClient {
 		}
 	}
 
+	@Override
+	public void setEnabled(String keycloakId, boolean enabled) {
+		// Only the flag is sent; Keycloak keeps every field that is left out
+		UserRepresentation changes = new UserRepresentation();
+		changes.setEnabled(enabled);
+
+		String step = "set enabled=" + enabled + " for user " + keycloakId;
+		try {
+			keycloak.realm(realm).users().get(keycloakId).update(changes);
+		} catch (WebApplicationException e) {
+			throw answerFailure(step, e.getResponse());
+		} catch (RuntimeException e) {
+			throw failure(step, e);
+		}
+	}
+
+	@Override
+	public void sendUpdatePasswordEmail(String keycloakId) {
+		String step = "send the update-password email to user " + keycloakId;
+		try {
+			// Keycloak sends the email; the user sets the password on Keycloak's own page, never through us
+			keycloak.realm(realm).users().get(keycloakId).executeActionsEmail(List.of(UPDATE_PASSWORD));
+		} catch (WebApplicationException e) {
+			throw answerFailure(step, e.getResponse());
+		} catch (RuntimeException e) {
+			throw failure(step, e);
+		}
+	}
+
 	/** Keycloak's error answer as an exception: 409 conflict, 400 refused value, anything else a failure. */
 	private KeycloakException answerFailure(String step, Response response) {
 		int status = response.getStatus();
@@ -166,13 +195,8 @@ public class KeycloakAdminClient implements KeycloakClient {
 		String step = "assign realm roles " + String.join(", ", roleNames) + " to user " + keycloakId;
 		RoleScopeResource userRealmRoles = keycloak.realm(realm).users().get(keycloakId).roles().realmLevel();
 
-		List<RoleRepresentation> available;
-		try {
-			// This account may not read a role by its name, but it may list the roles this user can still get
-			available = userRealmRoles.listAvailable();
-		} catch (RuntimeException e) {
-			throw failure(step, e);
-		}
+		// This account may not read a role by its name, but it may list the roles this user can still get
+		List<RoleRepresentation> available = readRoles(step, userRealmRoles, true);
 
 		List<RoleRepresentation> toAdd = new ArrayList<>();
 		List<String> missing = new ArrayList<>();
@@ -185,11 +209,63 @@ public class KeycloakAdminClient implements KeycloakClient {
 			}
 		}
 		if (!missing.isEmpty()) {
-			throw new KeycloakException(prefix(step), "Keycloak has no realm role " + String.join(", ", missing), null);
+			// A role missing from "available" may simply be one the user already has
+			List<RoleRepresentation> held = readRoles(step, userRealmRoles, false);
+			List<String> reallyMissing = new ArrayList<>();
+			for (String name : missing) {
+				if (findByName(held, name) == null) {
+					reallyMissing.add(name);
+				}
+			}
+			if (!reallyMissing.isEmpty()) {
+				throw new KeycloakException(prefix(step), "Keycloak has no realm role " + String.join(", ", reallyMissing),
+						null);
+			}
+		}
+		if (toAdd.isEmpty()) {
+			// Every role was already there
+			return;
 		}
 
 		try {
 			userRealmRoles.add(toAdd);
+		} catch (RuntimeException e) {
+			throw failure(step, e);
+		}
+	}
+
+	@Override
+	public void removeRealmRoles(String keycloakId, List<String> roleNames) {
+		String step = "remove realm roles " + String.join(", ", roleNames) + " from user " + keycloakId;
+		RoleScopeResource userRealmRoles = keycloak.realm(realm).users().get(keycloakId).roles().realmLevel();
+		// A role must be named by its full description, which this account can read from the user's own roles
+		List<RoleRepresentation> held = readRoles(step, userRealmRoles, false);
+
+		List<RoleRepresentation> toRemove = new ArrayList<>();
+		for (String name : roleNames) {
+			RoleRepresentation role = findByName(held, name);
+			// A role the user doesn't have is already removed
+			if (role != null) {
+				toRemove.add(role);
+			}
+		}
+		if (toRemove.isEmpty()) {
+			return;
+		}
+		try {
+			userRealmRoles.remove(toRemove);
+		} catch (RuntimeException e) {
+			throw failure(step, e);
+		}
+	}
+
+	/** The user's realm roles: the ones they can still get (available) or the ones they have. */
+	private List<RoleRepresentation> readRoles(String step, RoleScopeResource userRealmRoles, boolean available) {
+		try {
+			if (available) {
+				return userRealmRoles.listAvailable();
+			}
+			return userRealmRoles.listAll();
 		} catch (RuntimeException e) {
 			throw failure(step, e);
 		}
