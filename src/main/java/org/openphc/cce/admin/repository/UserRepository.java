@@ -6,10 +6,13 @@ import java.util.UUID;
 
 import org.openphc.cce.admin.entity.User;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.transaction.annotation.Transactional;
+
+import jakarta.persistence.LockModeType;
 
 public interface UserRepository extends JpaRepository<User, UUID> {
 
@@ -17,6 +20,10 @@ public interface UserRepository extends JpaRepository<User, UUID> {
 	Optional<User> findByKeycloakId(String keycloakId);
 
 	boolean existsByUsername(String username);
+
+	/** The user, locked until this transaction ends: a second status or roles change of the same user waits here. */
+	@Lock(LockModeType.PESSIMISTIC_WRITE)
+	Optional<User> findLockedById(UUID id);
 
 	/** Whether any user has this email, in any case. */
 	@Query("SELECT COUNT(u) > 0 FROM User u WHERE lower(u.email) = lower(:email)")
